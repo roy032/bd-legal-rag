@@ -1,0 +1,16 @@
+{
+  "acts": 1,
+  "sections": 160,
+  "chunks": 215,
+  "chunks_continuation": 54,
+  "languages": {
+    "bn": 1
+  },
+  "chunk_chars": {
+    "min": 160,
+    "median": 959,
+    "p95": 1765,
+    "max": 7283
+  },
+  "seconds": 15.7
+}
