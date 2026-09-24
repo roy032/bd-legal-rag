@@ -25,7 +25,8 @@ def main() -> None:
     ap.add_argument("--eval", default="data/eval/eval.jsonl")
     ap.add_argument("--chunks", default="data/processed/chunks.jsonl")
     ap.add_argument("--index", default="data/index")
-    ap.add_argument("--embedder", choices=["st", "hashing"], default="st")
+    ap.add_argument("--embedder", choices=["auto", "st", "hashing"], default="auto",
+                    help="auto = the embedder the index was built with")
     ap.add_argument("--model", default="BAAI/bge-m3")
     ap.add_argument("-k", type=int, default=10)
     add_retrieval_args(ap)
@@ -45,7 +46,7 @@ def main() -> None:
                 print(f"  - {p}")
             sys.exit("fix the evaluation set first — bad labels make every number meaningless")
 
-    embedder = get_embedder(args.embedder, model=args.model)
+    embedder = get_embedder(args.embedder, model=args.model, index_dir=args.index)
     llm = get_llm(args.provider) if (args.multi_query or args.hyde) else None
     retriever = build_pipeline(args, args.index, embedder, llm=llm)
 

@@ -31,7 +31,8 @@ def main() -> None:
     ap.add_argument("--eval", default="data/eval/eval.jsonl")
     ap.add_argument("--chunks", default="data/processed/chunks.jsonl")
     ap.add_argument("--index", default="data/index")
-    ap.add_argument("--embedder", choices=["st", "hashing"], default="st")
+    ap.add_argument("--embedder", choices=["auto", "st", "hashing"], default="auto",
+                    help="auto = the embedder the index was built with")
     ap.add_argument("--model", default="BAAI/bge-m3")
     ap.add_argument("-k", type=int, default=10)
     ap.add_argument("--metric", default="recall@5")
@@ -49,7 +50,7 @@ def main() -> None:
         print("\n".join(f"  - {p}" for p in problems[:20]))
         sys.exit("evaluation set is invalid")
 
-    embedder = get_embedder(args.embedder, model=args.model)
+    embedder = get_embedder(args.embedder, model=args.model, index_dir=args.index)
     pipeline = build_pipeline(args, args.index, embedder)
     run = run_retrieval(items, pipeline, k=args.k)
     summary = summarize("ci", {"k": args.k, **pipeline.config.to_dict()}, items, run)

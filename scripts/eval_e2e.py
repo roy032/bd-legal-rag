@@ -38,7 +38,8 @@ def main() -> None:
     ap.add_argument("--eval", default="data/eval/eval.jsonl")
     ap.add_argument("--chunks", default="data/processed/chunks.jsonl")
     ap.add_argument("--index", default="data/index")
-    ap.add_argument("--embedder", choices=["st", "hashing"], default="st")
+    ap.add_argument("--embedder", choices=["auto", "st", "hashing"], default="auto",
+                    help="auto = the embedder the index was built with")
     ap.add_argument("--model", default="BAAI/bge-m3")
     ap.add_argument("-k", type=int, default=5)
     ap.add_argument("--no-sandwich", action="store_true")
@@ -72,7 +73,7 @@ def main() -> None:
     if args.limit:
         items = items[: args.limit]
 
-    embedder = get_embedder(args.embedder, model=args.model)
+    embedder = get_embedder(args.embedder, model=args.model, index_dir=args.index)
     llm = get_llm(args.provider, args.llm_model)
     judge = None if args.no_judge else get_llm(args.judge_provider, args.judge_model)
     retriever = build_pipeline(args, args.index, embedder, llm=llm)

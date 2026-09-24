@@ -1,13 +1,15 @@
 """One configurable search pipeline, shared by the CLI, the service and the evaluator.
 
     question
+      ├─ resolve explicit references ("দণ্ডবিধির ধারা ৩০২") -> act id + section
       ├─ classify (exact reference / comparative / conceptual) -> weight profile
       ├─ variants: romanised Bangla, section-number expansion, synonyms,
       │            LLM rewrites, HyDE
       ├── dense  (bi-encoder, top C)  ┐
       └── BM25   (lexical, top C)     ├─ reciprocal rank fusion
                                       ┘
-            ├─ in-force boost (amended / repealed pushed down)
+            ├─ exact references first (lookup, not search)
+            ├─ in-force boost (repealed acts / [Omitted] stubs pushed down)
             ├─ dedupe parts of the same section
             ├─ MMR (relevance vs. diversity)
             ├─ cross-encoder rerank (top C -> k)
@@ -31,6 +33,7 @@ from .lexical import BM25Index
 from .lexicon import ROUTE_WEIGHTS, classify, expand_synonyms
 from .parent import ParentIndex, expand_to_parents
 from .query import expand_section_refs, hyde, multi_query
+from .refs import ActResolver, Reference, apply_reference
 from .rerank import get_reranker
 from .retrieve import Retriever, dedupe_by_section
 from .store import Hit
@@ -57,6 +60,7 @@ class RetrievalConfig:
     parent_max_chars: int = 4000
     max_parts_per_section: int | None = None
     include_repealed: bool = False
+    resolve_refs: bool = False           # act names + section numbers -> exact lookup
     embedder: str = ""
     extras: dict = field(default_factory=dict)
 
@@ -73,7 +77,7 @@ class RetrievalConfig:
 class SearchPipeline:
     def __init__(self, config: RetrievalConfig, dense: Retriever | None = None,
                  bm25: BM25Index | None = None, reranker=None, llm=None,
-                 parents: ParentIndex | None = None) -> None:
+                 parents: ParentIndex | None = None, resolver: ActResolver | None = None) -> None:
         if config.mode in ("dense", "hybrid") and dense is None:
             raise ValueError(f"mode '{config.mode}' needs a dense retriever")
         if config.mode in ("bm25", "hybrid") and bm25 is None:
@@ -82,6 +86,16 @@ class SearchPipeline:
             raise ValueError("parent_context needs a ParentIndex")
         self.config, self.dense, self.bm25 = config, dense, bm25
         self.reranker, self.llm, self.parents = reranker, llm, parents
+        if config.resolve_refs and resolver is None:
+            records = (bm25.records if bm25 is not None
+                       else dense.store.records if dense is not None else [])
+            resolver = ActResolver(records)
+        self.resolver = resolver
+
+    def reference(self, question: str) -> Reference:
+        if not (self.config.resolve_refs and self.resolver):
+            return Reference()
+        return self.resolver.resolve(question)
 
     # ---- query side -------------------------------------------------
     def queries(self, question: str) -> list[str]:
@@ -126,17 +140,22 @@ class SearchPipeline:
             filters["repealed"] = False
 
         dense_w, bm25_w = self.weights(question)
+        ref = self.reference(question)
+        searches: list[tuple[str, dict]] = [(q, filters) for q in self.queries(question)]
+        if ref.act_ids and not ref.numbers and act_id is None:
+            # The question names an act: also search inside that act only.
+            searches += [(question, {**filters, "act_id": aid}) for aid in ref.act_ids]
         lists: list[list[Hit]] = []
         weights: list[float] = []
-        for q in self.queries(question):
+        for q, f in searches:
             if cfg.mode in ("dense", "hybrid"):
                 assert self.dense is not None
                 lists.append(self.dense.store.search(
-                    self.dense.embedder.encode_queries([q])[0], k=c, filters=filters))
+                    self.dense.embedder.encode_queries([q])[0], k=c, filters=f))
                 weights.append(dense_w)
             if cfg.mode in ("bm25", "hybrid"):
                 assert self.bm25 is not None
-                lists.append(self.bm25.search(q, k=c, filters=filters))
+                lists.append(self.bm25.search(q, k=c, filters=f))
                 weights.append(bm25_w)
 
         if not lists:
@@ -147,6 +166,9 @@ class SearchPipeline:
 
         if cfg.boost_in_force:
             candidates = boost_in_force(candidates)
+        if ref:
+            assert self.resolver is not None
+            candidates = apply_reference(candidates, ref, self.resolver)
         if max_parts:
             candidates = dedupe_by_section(candidates, max_parts=max_parts)
         if cfg.mmr_lambda is not None and self.dense is not None:
@@ -221,6 +243,8 @@ def add_retrieval_args(ap) -> None:
     ap.add_argument("--parent-max-chars", type=int, default=4000)
     ap.add_argument("--max-parts-per-section", type=int)
     ap.add_argument("--include-repealed", action="store_true")
+    ap.add_argument("--resolve-refs", action="store_true",
+                    help="look up 'দণ্ডবিধির ধারা ৩০২' directly instead of searching for it")
 
 
 def build_pipeline(config, index_dir: str | Path, embedder, llm=None,

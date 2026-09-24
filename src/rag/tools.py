@@ -57,6 +57,8 @@ class EvidenceBook:
                 head += f" — {h.metadata['section_title']}"
             if h.metadata.get("amended"):
                 head += " [amended]"
+            if h.metadata.get("repealed"):
+                head += " [REPEALED ACT]"
             refs = h.metadata.get("refs") or []
             if refs:
                 head += f"  (refers to sections: {', '.join(map(str, refs[:8]))})"

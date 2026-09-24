@@ -25,13 +25,16 @@ redis = ["redis>=5.0"]
 dev = ["ruff>=0.6", "mypy>=1.11", "coverage>=7.6", "pip-audit>=2.7"]
 
 [project.scripts]
-bdrag = "cli:main"
+bdrag = "rag.cli:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+service = ["static/*"]
 
 [tool.ruff]
 line-length = 100

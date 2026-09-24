@@ -58,7 +58,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("question", nargs="*")
     ap.add_argument("--index", default="data/index")
-    ap.add_argument("--embedder", choices=["st", "hashing"], default="st")
+    ap.add_argument("--embedder", choices=["auto", "st", "hashing"], default="auto",
+                    help="auto = the embedder the index was built with")
     ap.add_argument("--model", default="BAAI/bge-m3")
     ap.add_argument("--provider", help="anthropic | openai | ollama | echo (default: $RAG_LLM)")
     ap.add_argument("--llm-model", help="override $RAG_MODEL")
@@ -85,7 +86,7 @@ def main() -> None:
     ap.add_argument("--interactive", action="store_true")
     args = ap.parse_args()
 
-    embedder = get_embedder(args.embedder, model=args.model)
+    embedder = get_embedder(args.embedder, model=args.model, index_dir=args.index)
     llm = get_llm(args.provider, args.llm_model)
     retriever = build_pipeline(args, args.index, embedder, llm=llm)
     guard = GuardConfig(min_score=args.min_score, min_hits=args.min_hits,

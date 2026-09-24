@@ -5,10 +5,11 @@ context window. MMR trades a little relevance for coverage:
 
     score = λ · relevance(d) - (1-λ) · max similarity(d, already selected)
 
-Boosting: relevance is not the only thing that matters in law. A superseded
-provision can be the best textual match and still be the wrong answer, so
-in-force text is nudged up and amended text nudged down, by an amount you set
-and then measure.
+Boosting: relevance is not the only thing that matters in law. A repealed act can
+be the best textual match and still be the wrong answer, and an "[Omitted]"
+placeholder matches a section number without saying anything. Both are pushed
+down. Amended sections are NOT penalised: bdlaws publishes consolidated text,
+so an amended section *is* the current law (the footnote records the change).
 """
 from __future__ import annotations
 
@@ -38,14 +39,14 @@ def mmr(hits: list[Hit], vectors: np.ndarray | None, k: int, lambda_: float = 0.
     return [hits[i] for i in selected]
 
 
-def boost_in_force(hits: list[Hit], amended_penalty: float = 0.05,
+def boost_in_force(hits: list[Hit], omitted_penalty: float = 0.3,
                    repealed_penalty: float = 0.5) -> list[Hit]:
-    """Nudge current law above superseded text, keeping the ranking otherwise."""
+    """Nudge current law above repealed text and empty placeholders."""
     rescored = []
     for h in hits:
         penalty = 0.0
-        if h.metadata.get("amended"):
-            penalty += amended_penalty
+        if h.metadata.get("omitted"):
+            penalty += omitted_penalty
         if h.metadata.get("repealed"):
             penalty += repealed_penalty
         rescored.append(Hit(h.chunk_id, h.score - penalty * abs(h.score or 1.0),

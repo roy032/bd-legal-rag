@@ -25,14 +25,25 @@ def describe(config: dict) -> str:
         bits.append(f"+rerank({config['rerank']})")
     if config.get("max_parts_per_section"):
         bits.append(f"+dedupe{config['max_parts_per_section']}")
+    for key, tag in (("synonyms", "+syn"), ("transliterate", "+translit"), ("route", "+route"),
+                     ("resolve_refs", "+resolve"), ("boost_in_force", "+in-force"),
+                     ("parent_context", "+parent")):
+        if config.get(key):
+            bits.append(tag)
+    if config.get("mmr_lambda") is not None:
+        bits.append(f"+mmr{config['mmr_lambda']}")
     return " ".join(bits)
 
 
-def markdown_table(runs: list[dict], metrics=("recall@5", "recall@10", "mrr", "ndcg@5")) -> str:
+def markdown_table(runs: list[dict], metrics=("recall@5", "recall@10", "mrr", "ndcg@5"),
+                   sort: bool = True) -> str:
+    """sort=True puts the best recall@5 first; an ablation passes sort=False to
+    keep its rows in order, since each row adds one thing to the row above."""
     gen = sorted({m for r in runs for m in r.get("generation", {}) if m in GEN_METRICS})
     head = ["run", "pipeline", "k", *metrics, *gen, "p95 latency (ms)"]
     lines = ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
-    for r in sorted(runs, key=lambda x: -(x["overall"].get("recall@5", {}).get("mean", 0))):
+    ordered = sorted(runs, key=lambda x: -(x["overall"].get("recall@5", {}).get("mean", 0))) if sort else runs
+    for r in ordered:
         row = [r["label"], describe(r.get("config", {})), str(r["config"].get("k", ""))]
         row += [cell(r["overall"], m) for m in metrics]
         row += [cell(r.get("generation", {}), m) for m in gen]

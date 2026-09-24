@@ -5,7 +5,10 @@ WORKDIR /app
 
 FROM base AS deps
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt starlette uvicorn[standard]
+# CPU-only torch first: the default wheel bundles CUDA libraries (several GB)
+# that a CPU container never uses.
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
+ && pip install --no-cache-dir -r requirements.txt
 
 FROM base AS runtime
 COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages

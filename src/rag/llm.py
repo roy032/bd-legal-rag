@@ -14,8 +14,14 @@ LLM = Callable[[str, str], str]           # (system, user_prompt) -> text
 StreamLLM = Callable[[str, str], "Iterator[str]"]  # (system, user_prompt) -> text chunks
 
 
-DEFAULT_TIMEOUT_S = float(os.environ.get("RAG_LLM_TIMEOUT", "60"))
-DEFAULT_RETRIES = int(os.environ.get("RAG_LLM_RETRIES", "2"))
+DEFAULT_TIMEOUT_S = float(os.environ.get("RAG_LLM_TIMEOUT") or "120")
+DEFAULT_RETRIES = int(os.environ.get("RAG_LLM_RETRIES") or "2")
+DEFAULT_MAX_TOKENS = int(os.environ.get("RAG_MAX_TOKENS") or "1024")
+# Ollama's default context window is small (2-4k tokens). Five Bangla excerpts
+# plus the instructions are well past that, and Ollama truncates the *start* of
+# the prompt silently — the model then answers without the rules or the first
+# excerpts. 8k is enough for k=5 at 1.8k characters per excerpt.
+OLLAMA_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX") or "8192")
 
 
 class LLMError(RuntimeError):
@@ -49,7 +55,7 @@ def _retryable(e: Exception) -> bool:
                                    "503", "504", "overloaded", "connection"))
 
 
-def anthropic_llm(model: str | None = None, max_tokens: int = 1024,
+def anthropic_llm(model: str | None = None, max_tokens: int = DEFAULT_MAX_TOKENS,
                   timeout_s: float = DEFAULT_TIMEOUT_S) -> LLM:
     import anthropic  # pip install anthropic
 
@@ -67,7 +73,7 @@ def anthropic_llm(model: str | None = None, max_tokens: int = 1024,
     return call
 
 
-def openai_llm(model: str | None = None, max_tokens: int = 1024,
+def openai_llm(model: str | None = None, max_tokens: int = DEFAULT_MAX_TOKENS,
                timeout_s: float = DEFAULT_TIMEOUT_S) -> LLM:
     from openai import OpenAI  # pip install openai
 
@@ -92,8 +98,9 @@ def ollama_llm(model: str | None = None, host: str = "http://localhost:11434",
 
     def call(system: str, prompt: str) -> str:
         r = requests.post(f"{host}/api/generate", timeout=timeout_s, json={
-            "model": model, "system": system, "prompt": prompt,
-            "stream": False, "options": {"temperature": 0, "num_predict": 512}})
+            "model": model, "system": system, "prompt": prompt, "stream": False,
+            "options": {"temperature": 0, "num_predict": DEFAULT_MAX_TOKENS,
+                        "num_ctx": OLLAMA_NUM_CTX}})
         r.raise_for_status()
         return r.json().get("response", "")
 
@@ -128,19 +135,28 @@ def get_llm(provider: str | None = None, model: str | None = None,
 # saving in a RAG system, and it is measurable: run the ablation with routing on
 # and off and compare correctness against spend.
 
+def _question_of(prompt: str) -> str:
+    """The user's question inside an answer prompt (<user_question> block or 'Question:')."""
+    if "<user_question>" in prompt:
+        return prompt.split("<user_question>", 1)[1].split("</user_question>", 1)[0].strip()
+    return prompt.split("Question:")[-1]
+
+
 def routed_llm(cheap: LLM, strong: LLM, should_escalate: Callable[[str, float | None], bool] | None = None) -> LLM:
     """Send easy questions to the cheap model, hard ones to the strong one."""
     def default_rule(question: str, top_score: float | None) -> bool:
+        # Question shape only: the wrapper sees the prompt, not the retrieval
+        # scores, so a "weak support" rule here would never fire. Pass a custom
+        # `should_escalate` from a caller that has the hits if you want one.
         long_question = len(question.split()) > 25
         comparative = any(w in question.lower() for w in
-                          ("difference", "compare", "vs", "পার্থক্য", "তুলনা", "কেন", "why"))
-        weak_support = top_score is not None and top_score < 0.35
-        return long_question or comparative or weak_support
+                          ("difference", "compare", " vs", "পার্থক্য", "তুলনা", "কেন", "why"))
+        return long_question or comparative
 
     rule = should_escalate or default_rule
 
     def call(system: str, prompt: str) -> str:
-        question = prompt.split("Question:")[-1][:400]
+        question = _question_of(prompt)[:400]
         return (strong if rule(question, None) else cheap)(system, prompt)
 
     return call
@@ -150,10 +166,11 @@ def routed_llm(cheap: LLM, strong: LLM, should_escalate: Callable[[str, float | 
 # Token streaming is a product decision, not a nicety: a grounded legal answer
 # takes several seconds, and a user staring at a blank box assumes it is broken.
 
-def anthropic_stream(model: str | None = None, max_tokens: int = 1024) -> StreamLLM:
+def anthropic_stream(model: str | None = None, max_tokens: int = DEFAULT_MAX_TOKENS,
+                     timeout_s: float = DEFAULT_TIMEOUT_S) -> StreamLLM:
     import anthropic
 
-    client = anthropic.Anthropic()
+    client = anthropic.Anthropic(timeout=timeout_s)
     model = model or os.environ.get("RAG_MODEL", "claude-sonnet-4-5")
 
     def call(system: str, prompt: str) -> Iterator[str]:
@@ -164,10 +181,11 @@ def anthropic_stream(model: str | None = None, max_tokens: int = 1024) -> Stream
     return call
 
 
-def openai_stream(model: str | None = None, max_tokens: int = 1024) -> StreamLLM:
+def openai_stream(model: str | None = None, max_tokens: int = DEFAULT_MAX_TOKENS,
+                  timeout_s: float = DEFAULT_TIMEOUT_S) -> StreamLLM:
     from openai import OpenAI
 
-    client = OpenAI()
+    client = OpenAI(timeout=timeout_s)
     model = model or os.environ.get("RAG_MODEL", "gpt-4o-mini")
 
     def call(system: str, prompt: str) -> Iterator[str]:
@@ -182,7 +200,8 @@ def openai_stream(model: str | None = None, max_tokens: int = 1024) -> StreamLLM
     return call
 
 
-def ollama_stream(model: str | None = None, host: str = "http://localhost:11434") -> StreamLLM:
+def ollama_stream(model: str | None = None, host: str = "http://localhost:11434",
+                  timeout_s: float = DEFAULT_TIMEOUT_S) -> StreamLLM:
     import json as _json
 
     import requests
@@ -191,10 +210,13 @@ def ollama_stream(model: str | None = None, host: str = "http://localhost:11434"
     model = model or os.environ.get("RAG_MODEL", "qwen2.5:7b")
 
     def call(system: str, prompt: str) -> Iterator[str]:
-        with requests.post(f"{host}/api/generate", stream=True, timeout=300,
+        # (connect, read): the read timeout applies between chunks, so a model
+        # that stalls mid-answer fails instead of holding the connection forever.
+        with requests.post(f"{host}/api/generate", stream=True, timeout=(10, timeout_s),
                            json={"model": model, "system": system, "prompt": prompt,
-                           "stream": True,
-                           "options": {"temperature": 0, "num_predict": 512}}) as r:
+                                 "stream": True,
+                                 "options": {"temperature": 0, "num_predict": DEFAULT_MAX_TOKENS,
+                                             "num_ctx": OLLAMA_NUM_CTX}}) as r:
             r.raise_for_status()
             for line in r.iter_lines():
                 if not line:

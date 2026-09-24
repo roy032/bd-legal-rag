@@ -29,7 +29,8 @@ def main() -> None:
     ap.add_argument("--eval", default="data/eval/eval.jsonl")
     ap.add_argument("--chunks", default="data/processed/chunks.jsonl")
     ap.add_argument("--index", default="data/index")
-    ap.add_argument("--embedder", choices=["st", "hashing"], default="st")
+    ap.add_argument("--embedder", choices=["auto", "st", "hashing"], default="auto",
+                    help="auto = the embedder the index was built with")
     ap.add_argument("--model", default="BAAI/bge-m3")
     ap.add_argument("-k", type=int, default=5)
     ap.add_argument("--pool", type=int, default=50, help="candidate pool size for the retrieval stage")
@@ -40,7 +41,7 @@ def main() -> None:
 
     items = load_eval(args.eval)
     corpus_keys = load_corpus_keys(args.chunks) if Path(args.chunks).exists() else None
-    embedder = get_embedder(args.embedder, model=args.model)
+    embedder = get_embedder(args.embedder, model=args.model, index_dir=args.index)
     pipeline = build_pipeline(args, args.index, embedder)
 
     answers = {}

@@ -104,7 +104,26 @@ class HashingEmbedder:
     encode_queries = encode_passages
 
 
-def get_embedder(kind: str = "st", model: str = "BAAI/bge-m3", **kw) -> Embedder:
+def get_embedder(kind: str = "st", model: str = "BAAI/bge-m3", index_dir=None, **kw) -> Embedder:
+    """kind: 'st' | 'hashing' | 'auto'. 'auto' reads index.json in `index_dir` and
+    builds the embedder the index was built with — querying a bge-m3 index with
+    the hashing embedder (or the reverse) is a dimension error at best and
+    silently meaningless scores at worst."""
+    if kind == "auto":
+        kind, model, kw = _from_index(index_dir, model, kw)
     if kind == "hashing":
         return HashingEmbedder(**kw)
     return SentenceTransformerEmbedder(model_name=model, **kw)
+
+
+def _from_index(index_dir, model: str, kw: dict) -> tuple[str, str, dict]:
+    import json
+    from pathlib import Path
+
+    info_path = Path(index_dir or "data/index") / "index.json"
+    if not info_path.exists():
+        return "st", model, kw
+    name = json.loads(info_path.read_text(encoding="utf-8")).get("embedder", "")
+    if name.startswith("hashing-"):
+        return "hashing", model, {"dim": int(name.split("-", 1)[1])}
+    return "st", name or model, kw

@@ -70,18 +70,36 @@ SECURITY_HEADERS = {
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
-    return os.environ.get(name, str(default)).lower() in ("1", "true", "yes", "on")
+    raw = os.environ.get(name, "").strip()
+    return raw.lower() in ("1", "true", "yes", "on") if raw else default
+
+
+def _env_float(name: str, default: float | None = None) -> float | None:
+    """Empty and unset mean the same thing: `BDRAG_MIN_SCORE=` in a .env file
+    must not crash startup with float('')."""
+    raw = os.environ.get(name, "").strip()
+    return float(raw) if raw else default
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    return int(raw) if raw else default
+
+
+def _env_str(name: str, default: str) -> str:
+    raw = os.environ.get(name, "").strip()
+    return raw or default
 
 
 @dataclass
 class ServiceConfig:
     index: str = "data/index"
     chunks: str = "data/processed/chunks.jsonl"
-    embedder: str = "st"
+    embedder: str = "auto"           # auto = whatever the index was built with (index.json)
     model: str = "BAAI/bge-m3"
     retrieval: RetrievalConfig = field(default_factory=lambda: RetrievalConfig(
         mode="hybrid", expand_refs=True, synonyms=True, transliterate=True, route=True,
-        max_parts_per_section=2))
+        boost_in_force=True, resolve_refs=True, max_parts_per_section=2))
     k: int = 5
     max_k: int = 20
     min_score: float | None = None
@@ -97,53 +115,56 @@ class ServiceConfig:
     api_keys: dict[str, float] = field(default_factory=dict)   # key -> requests/min
     require_api_key: bool = False
     entailer: str = "none"           # none | lexical | nli
-    feedback_path: str = "data/feedback.jsonl"
-    analytics_path: str = "data/queries.jsonl"
+    # Empty = don't write. Only from_env() turns logging on, so a ServiceConfig
+    # built in a test never appends to the real data/queries.jsonl.
+    feedback_path: str = ""
+    analytics_path: str = ""
     cors_origins: list[str] = field(default_factory=lambda: ["*"])
+    trust_proxy: bool = False        # honour X-Forwarded-For (only behind your own proxy)
 
     @classmethod
     def from_env(cls) -> ServiceConfig:
-        e = os.environ.get
-        mmr = e("BDRAG_MMR")
         retrieval = RetrievalConfig(
-            mode=e("BDRAG_MODE", "hybrid"),
-            rerank=e("BDRAG_RERANK", "none"),
+            mode=_env_str("BDRAG_MODE", "hybrid"),
+            rerank=_env_str("BDRAG_RERANK", "none"),
             expand_refs=_env_bool("BDRAG_EXPAND_REFS", True),
             synonyms=_env_bool("BDRAG_SYNONYMS", True),
             transliterate=_env_bool("BDRAG_TRANSLITERATE", True),
             route=_env_bool("BDRAG_ROUTE", True),
             boost_in_force=_env_bool("BDRAG_BOOST_IN_FORCE", True),
+            resolve_refs=_env_bool("BDRAG_RESOLVE_REFS", True),
             parent_context=_env_bool("BDRAG_PARENT_CONTEXT", False),
-            mmr_lambda=float(mmr) if mmr else None,
-            max_parts_per_section=int(e("BDRAG_MAX_PARTS", "2")),
+            mmr_lambda=_env_float("BDRAG_MMR"),
+            max_parts_per_section=_env_int("BDRAG_MAX_PARTS", 2),
         )
         keys: dict[str, float] = {}
-        min_score = e("BDRAG_MIN_SCORE")
-        if raw := e("BDRAG_API_KEYS"):       # "key1:60,key2:20"
+        if raw := os.environ.get("BDRAG_API_KEYS", "").strip():   # "key1:60,key2:20"
             for entry in raw.split(","):
                 key, _, rate = entry.partition(":")
-                keys[key.strip()] = float(rate or "20")
+                if key.strip():
+                    keys[key.strip()] = float(rate or "20")
         return cls(
-            index=e("BDRAG_INDEX", "data/index"),
-            chunks=e("BDRAG_CHUNKS", "data/processed/chunks.jsonl"),
-            embedder=e("BDRAG_EMBEDDER", "st"),
-            model=e("BDRAG_MODEL", "BAAI/bge-m3"),
+            index=_env_str("BDRAG_INDEX", "data/index"),
+            chunks=_env_str("BDRAG_CHUNKS", "data/processed/chunks.jsonl"),
+            embedder=_env_str("BDRAG_EMBEDDER", "auto"),
+            model=_env_str("BDRAG_MODEL", "BAAI/bge-m3"),
             retrieval=retrieval,
-            k=int(e("BDRAG_K", "5")),
-            min_score=float(min_score) if min_score is not None else None,
+            k=_env_int("BDRAG_K", 5),
+            min_score=_env_float("BDRAG_MIN_SCORE"),
             agent_enabled=_env_bool("BDRAG_AGENT", True),
             agent_auto=_env_bool("BDRAG_AGENT_AUTO", True),
-            max_steps=int(e("BDRAG_MAX_STEPS", "5")),
-            provider=e("RAG_LLM"),
-            llm_model=e("RAG_MODEL", ""),
-            cache_ttl_s=float(e("BDRAG_CACHE_TTL", "1800")),
-            rate_per_min=float(e("BDRAG_RATE_PER_MIN", "20")),
+            max_steps=_env_int("BDRAG_MAX_STEPS", 5),
+            provider=os.environ.get("RAG_LLM", "").strip() or None,
+            llm_model=_env_str("RAG_MODEL", ""),
+            cache_ttl_s=_env_float("BDRAG_CACHE_TTL", 1800.0) or 0.0,
+            rate_per_min=_env_float("BDRAG_RATE_PER_MIN", 20.0) or 20.0,
             api_keys=keys,
             require_api_key=_env_bool("BDRAG_REQUIRE_API_KEY", False),
-            entailer=e("BDRAG_ENTAILER", "none"),
-            feedback_path=e("BDRAG_FEEDBACK", "data/feedback.jsonl"),
-            analytics_path=e("BDRAG_ANALYTICS", "data/queries.jsonl"),
-            cors_origins=[o for o in e("BDRAG_CORS", "*").split(",") if o],
+            entailer=_env_str("BDRAG_ENTAILER", "none"),
+            feedback_path=_env_str("BDRAG_FEEDBACK", "data/feedback.jsonl"),
+            analytics_path=_env_str("BDRAG_ANALYTICS", "data/queries.jsonl"),
+            cors_origins=[o.strip() for o in _env_str("BDRAG_CORS", "*").split(",") if o.strip()],
+            trust_proxy=_env_bool("BDRAG_TRUST_PROXY", False),
         )
 
 
@@ -176,13 +197,19 @@ class RequestContext(BaseHTTPMiddleware):
         return response
 
 
-def _client(request: Request) -> str:
-    fwd = request.headers.get("x-forwarded-for")
-    return (fwd.split(",")[0].strip() if fwd
-            else (request.client.host if request.client else "unknown"))
+def _client(request: Request, trust_proxy: bool = False) -> str:
+    """Who is asking, for rate limiting. X-Forwarded-For is set by the caller, so
+    trusting it lets anyone pick a fresh identity per request and walk past the
+    limiter. Only honour it when the service sits behind a proxy you control."""
+    fwd = request.headers.get("x-forwarded-for") if trust_proxy else None
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
 
 
 def _append_jsonl(path: str, row: dict) -> None:
+    if not path:
+        return
     try:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         with open(path, "a", encoding="utf-8") as f:
@@ -222,7 +249,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         from rag.llm import get_llm, get_stream_llm
         from rag.pipeline import build_pipeline, load_records
 
-        embedder = get_embedder(cfg.embedder, model=cfg.model)
+        embedder = get_embedder(cfg.embedder, model=cfg.model, index_dir=cfg.index)
         state["records"] = state["records"] or load_records(cfg.index, cfg.chunks)
         state["llm"] = state["llm"] or get_llm(cfg.provider)
         state["stream_llm"] = state["stream_llm"] or get_stream_llm(cfg.provider)
@@ -249,6 +276,17 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
                                                     guard=guard()))
         return state["agent"]
 
+    def remember(answer_id: str, out: dict, ans, client, use_agent: bool) -> None:
+        """Permalink store (bounded) + one analytics row per answer, for both
+        the plain and the streaming endpoint."""
+        recent[answer_id] = out
+        while len(recent) > 500:
+            recent.pop(next(iter(recent)))
+        _append_jsonl(cfg.analytics_path, {
+            "ts": time.time(), "id": answer_id, "client": client, "question": ans.question,
+            "agent": use_agent, "refused": ans.refused, "failures": ans.failures,
+            "sources": [s["chunk_id"] for s in ans.sources], "latency_s": round(ans.latency_s, 2)})
+
     async def payload(request: Request) -> dict:
         try:
             body = await request.json()
@@ -269,7 +307,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
             return None, f"key:{key[:6]}"
         if cfg.require_api_key:
             return JSONResponse({"error": "missing or unknown API key"}, status_code=401), None
-        return None, _client(request)
+        return None, _client(request, cfg.trust_proxy)
 
     def limited(client: str):
         decision = limiter.check(client)
@@ -435,19 +473,13 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         answer_id = uuid.uuid4().hex[:10]
         out = serialize(ans, answer_id=answer_id)
         answers.put(key, out)
-        recent[answer_id] = out
-        if len(recent) > 500:
-            recent.pop(next(iter(recent)))
-        _append_jsonl(cfg.analytics_path, {
-            "ts": time.time(), "id": answer_id, "client": client, "question": question,
-            "agent": use_agent, "refused": ans.refused, "failures": ans.failures,
-            "sources": [s["chunk_id"] for s in ans.sources], "latency_s": round(ans.latency_s, 2)})
+        remember(answer_id, out, ans, client, use_agent)
         trace.finish(endpoint="ask", refused=ans.refused, agent=use_agent,
                      llm_calls=ans.llm_calls)
         return JSONResponse(out)
 
     async def ask_stream(request: Request):
-        blocked, _ = gate(request)
+        blocked, client = gate(request)
         if blocked is not None:
             return blocked
         body = await payload(request)
@@ -475,7 +507,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
                         record_cost(ans)
                         answer_id = uuid.uuid4().hex[:10]
                         out = serialize(ans, answer_id=answer_id)
-                        recent[answer_id] = out
+                        remember(answer_id, out, ans, client, False)
                         yield sse("final", out)
                     else:
                         yield sse(kind, {k2: v for k2, v in item.items() if k2 != "type"})

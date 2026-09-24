@@ -15,8 +15,11 @@ import re
 
 from ingest.textutils import bn_to_ascii_digits, nfc
 
+# The optional letter suffix ("304A", "৫ক") must touch the digits and end the
+# token: "ধারা ৩০২ কী" is section 302, not "302ক", and "section 2 of" is not "2OF".
 SECTION_REF = re.compile(nfc(r"(?:ধারা(?:র|য়|য়ে|তে)?|উপ-?ধারা|section|sec\.?|s\.)\s*"
-                             r"([0-9০-৯]+\s*[A-Za-zক-হ]{0,2})"), re.IGNORECASE)
+                             r"([0-9০-৯]+(?:[A-Za-z]{1,2}(?![A-Za-z])|[ক-হ](?![ঀ-৿]))?)"),
+                         re.IGNORECASE)
 
 
 def expand_section_refs(question: str) -> str:

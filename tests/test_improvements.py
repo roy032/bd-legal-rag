@@ -108,12 +108,14 @@ class TestDiversityAndBoost(unittest.TestCase):
         hits = [Hit("a", 1.0, "t", "b", {}), Hit("b", 0.5, "t", "b", {})]
         self.assertEqual([h.chunk_id for h in mmr(hits, None, k=1)], ["a"])
 
-    def test_in_force_boost_demotes_amended_and_repealed(self):
+    def test_in_force_boost_demotes_repealed_and_placeholders_not_amended(self):
+        # bdlaws text is consolidated: an amended section IS the current law.
         hits = [Hit("amended", 0.50, "t", "b", {"amended": True}),
                 Hit("current", 0.48, "t", "b", {}),
+                Hit("omitted", 0.55, "t", "b", {"omitted": True}),
                 Hit("repealed", 0.60, "t", "b", {"repealed": True})]
         order = [h.chunk_id for h in boost_in_force(hits)]
-        self.assertEqual(order[0], "current")
+        self.assertEqual(order[:2], ["amended", "current"])
         self.assertEqual(order[-1], "repealed")
 
 

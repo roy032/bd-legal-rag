@@ -59,6 +59,8 @@ def format_context(hits: list[Hit], max_chars: int = 1500) -> str:
             head += f" ({m['chapter']})"
         if m.get("amended"):
             head += " [amended]"
+        if m.get("repealed"):
+            head += " [REPEALED ACT]"
         body = h.body[:max_chars]
         blocks.append(f"{head}\n{body}")
     return "\n\n".join(blocks)
