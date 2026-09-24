@@ -80,8 +80,9 @@ testing retrieval-only behavior.
 
 Command-line entry points live in `scripts/`; `make help` lists them. Design
 decisions are recorded in `docs/adr/`, the corpus is described in
-`docs/DATA_CARD.md`, and `IMPROVEMENTS.md` / `IMPLEMENTED.md` track what is done
-and what is deliberately left.
+`docs/DATA_CARD.md`, `docs/RUNBOOK_WINDOWS.md` walks through the full run on a
+Windows laptop, and `IMPROVEMENTS.md` / `IMPLEMENTED.md` track what is done and
+what is deliberately left.
 
 ## Results
 

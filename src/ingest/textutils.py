@@ -84,6 +84,10 @@ _LEGACY_FIXES = [
     (re.compile("ল([িীুূে]?)\u00ad"), "ল্ল\\1"),  # উলি<SHY>খিত -> উল্লিখিত
     (re.compile("\u00ad"), ""),               # any other soft hyphen
     (re.compile("ে্য"), "্যে"),                 # vowel sign before য-ফলা: লক্ষে্য -> লক্ষ্যে
+    # Stray zero-width joiners: legitimate only next to a virama (র‍্য, ক্‍).
+    (re.compile("ব\u200dসর"), "বৎসর"),          # ব<ZWJ>সর -> বৎসর (the ত্ was lost)
+    (re.compile("ত\u200d(?=[^ঀ-৿]|$)"), "ৎ"),   # ত<ZWJ> at a word end -> ৎ
+    (re.compile("(?<!্)\u200d(?!্)"), ""),
     # Khanda ta last, so it also catches ত্ produced by the fixes above.
     (re.compile("ত্(?=[সকপখফশ]|$|[^ঀ-৿])"), "ৎ"),  # বত্সর -> বৎসর, তত্ক্ষণাত্ -> তৎক্ষণাৎ
 ]

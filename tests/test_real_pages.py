@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from ingest.chunk import act_overview_chunk, chunk_section  # noqa: E402
 from ingest.models import Act, SectionRef  # noqa: E402
-from ingest.parse import parse_act, parse_section  # noqa: E402
+from ingest.parse import _parse_section_label, is_omitted, parse_act, parse_section  # noqa: E402
 from ingest.textutils import fix_legacy_bangla, normalize  # noqa: E402
 
 REAL = ROOT / "tests" / "fixtures" / "real"
@@ -145,6 +145,35 @@ class TestRealSectionPages(unittest.TestCase):
         self.assertIn("২০১০", chunk.metadata["repeal_note"])
 
 
+class TestIrregularLabels(unittest.TestCase):
+    """Contents-list labels found in the full corpus that the regular pattern missed.
+    Each one used to inherit the previous section's number."""
+
+    def test_toc_labels(self):
+        cases = {
+            "৫৮ক  [বিলুপ্ত]": ("৫৮ক", "[বিলুপ্ত]"), "২০।ক [বিলুপ্ত]": ("২০ক", "[বিলুপ্ত]"),
+            "৩২ ক। [বিলুপ্ত]": ("৩২ক", "[বিলুপ্ত]"), "16 A. Function of the Board": ("16A", "Function of the Board"),
+            "[74. The Bank shall": ("74", "The Bank shall"), "9 and 10. [Repealed]": ("9", "[Repealed]"),
+            "125A Crossing a cheque": ("125A", "Crossing a cheque"), "44CCC.": ("44CCC", ""),
+            "১৫ককক। বিকল্প পরিচালক": ("১৫ককক", "বিকল্প পরিচালক"),
+            "৬০। ১৯৯১ সনের ২২ নং আইনের সংশোধন": ("৬০", "১৯৯১ সনের ২২ নং আইনের সংশোধন"),
+        }
+        for label, want in cases.items():
+            self.assertEqual(_parse_section_label(label, toc=True), want, label)
+
+    def test_years_are_not_section_numbers(self):
+        for label in ("১৯৯১ সনের ২২ নং আইনের সংশোধন", "২০০৭-০৮ অর্থ বৎসরের জন্য", "(1) This Order"):
+            self.assertEqual(_parse_section_label(label, toc=True)[0], "", label)
+
+    def test_omitted_placeholders(self):
+        for text, title in [("[***]", ""), ("6A. [***]", ""), ("[[* * *]]", ""), ("", ""),
+                            ("৫। [***]", "[রহিত]"), ("x", "[Omitted.]"), ("৭। ...", "[বিলুপ্ত]")]:
+            self.assertTrue(is_omitted(text, title), (text, title))
+        for text, title in [("3. In this Act–", "Interpretation-clause"), ("a [*] b", ""),
+                            ("text", "Repeal of sections 3 and 4")]:
+            self.assertFalse(is_omitted(text, title), (text, title))
+
+
 class TestLegacyBangla(unittest.TestCase):
     def test_known_artefacts(self):
         cases = {
@@ -154,6 +183,8 @@ class TestLegacyBangla(unittest.TestCase):
             "ত্মেগত্রে": "ক্ষেত্রে", "তেগত্রে": "ক্ষেত্রে", "ত্মগমতা": "ক্ষমতা", "কতৃর্ক": "কর্তৃক",
             "হস্ত্মান্তর": "হস্তান্তর", "সাতগ্য": "সাক্ষ্য", "পরীতগা": "পরীক্ষা",
             "লত্মেগ্য": "লক্ষ্যে", "তত্ত্মগণাত্": "তৎক্ষণাৎ",
+            "দুই ব\u200dসরের": "দুই বৎসরের", "বলবৎ \u200d\u200dঅন্য": "বলবৎ অন্য",
+            "উ\u200dৎস": "উৎস", "র\u200d্যাব": "র\u200d্যাব",
         }
         for broken, fixed in cases.items():
             self.assertEqual(fix_legacy_bangla(broken), fixed, broken)

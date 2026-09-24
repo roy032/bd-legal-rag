@@ -47,11 +47,21 @@ CHAPTER_RE = re.compile(nfc(
     r"|\S+\s+(?:অধ্যায়|পরিচ্ছেদ|ভাগ|খণ্ড|খন্ড)(?=$|\s|[-–—:]))"
 ))
 # "১৷ সংক্ষিপ্ত শিরোনাম", "25A. Punishment", "2. Definitions.-", "৫ক৷ ..."
-SECTION_LABEL_RE = re.compile(r"^\s*([0-9০-৯]+[A-Za-zক-হ]{0,2})\s*[।৷.:)\-–]\s*(.*)$", re.S)
+SECTION_LABEL_RE = re.compile(r"^\s*([0-9০-৯]{1,3}[A-Za-zক-হ]{0,3})\s*[।৷.:)\-–]\s*(.*)$", re.S)
 TOC_MARKERS = {nfc(x) for x in {"সূচি", "সূচী", "ধারাসমূহ", "sections", "contents", "index"}}
 REPEALED_RE = re.compile(nfc(r"রহিত\s*করা\s*হইয়াছে|রহিত\s*হইয়াছে|\bRepealed\b"), re.I)
 OMITTED_RE = re.compile(nfc(r"^\s*(?:[0-9০-৯]+[A-Za-zক-হ]{0,2}\s*[।৷.:]\s*)?\[?\s*"
                             r"(?:Repealed|Omitted|বিলুপ্ত|রহিত)\b.{0,200}$"), re.I | re.S)
+# "[***]", "6A. [***]", "[[* * *]]" — the site's placeholder for text that was removed
+STARS_ONLY_RE = re.compile(r"^\s*(?:[0-9০-৯]+[A-Za-zক-হ]{0,2}\s*[।৷.:]\s*)?[\[\]\s]*\*[\s*\[\]]*$")
+OMITTED_TITLE_RE = re.compile(nfc(r"^\[?\s*(?:\*[\s*]*|repealed|omitted|repeal|বিলুপ্ত|রহিত)\s*\.?\s*\]?\.?$"), re.I)
+
+
+def is_omitted(text: str, title: str = "") -> bool:
+    """True for sections the site shows only as removed: empty, '[***]', 'Omitted.'…"""
+    t = text.strip()
+    return (not t or bool(OMITTED_RE.match(t)) or bool(STARS_ONLY_RE.match(t))
+            or bool(OMITTED_TITLE_RE.match(title.strip())))
 DATE_RE = re.compile(r"^\[\s*(.{4,60}?)\s*\]$")
 FOOTNOTE_RE = re.compile(nfc(
     r"^[0-9০-৯]+\s*[\S].*(প্রতিস্থাপিত|সন্নিবেশিত|বিলুপ্ত|সংযোজিত|রহিত|"
@@ -121,8 +131,34 @@ def parse_index(html: str) -> list[ActRef]:
 
 # ---------------------------------------------------------------- act page
 
-def _parse_section_label(text: str) -> tuple[str, str]:
+# Irregular labels of omitted sections in the site's contents list:
+#   "৩২ ক। [বিলুপ্ত]" (space before the letter), "২০।ক [বিলুপ্ত]" (letter after the
+#   full stop), "৫৮ক  [বিলুপ্ত]" (no full stop). Without these the section inherited
+#   the previous number, and "ধারা ৫৮" could resolve to the omitted ৫৮ক.
+_LABEL_FIXES = [
+    (re.compile(r"^([0-9০-৯]+)\s+([A-Zক-হ]{1,2})\s*([।৷.:])"), r"\1\2\3"),
+    (re.compile(r"^([0-9০-৯]+)[।৷.]([ক-হ]{1,2})\s+(?=\[)"), r"\1\2। "),
+    (re.compile(r"^([0-9০-৯]+[A-Za-zক-হ]{0,2})\s+(?=\[)"), r"\1। "),
+]
+
+
+# Contents-list entries only (never section bodies, where "5 persons" is text):
+#   "[7A. The main functions" (amendment bracket first), "9 and 10. [Repealed]"
+#   (a range: keep the first number), "125A Crossing a cheque" (no full stop).
+_TOC_LABEL_FIXES = [
+    (re.compile(r"^\[\s*([0-9০-৯]+[A-Za-zক-হ]{0,2})\s*([।৷.])"), r"\1\2 "),
+    (re.compile(r"^([0-9]{1,3}[A-Z]{0,3})\s*(?:and|to|,|-|–)\s*[0-9]+[A-Z]{0,3}\s*[.:]?\s*"), r"\1. "),
+    # 1-3 digits only: a 4-digit start is a year ("১৯৯১ সনের ... সংশোধন"), not a number
+    (re.compile(r"^([0-9]{1,3}[A-Z]{0,3})\s+(?=[A-Z][a-z])"), r"\1. "),
+    (re.compile(r"^([০-৯]{1,3}[ক-হ]{0,3})\s+(?=[ঀ-৿])"), r"\1। "),
+    (re.compile(r"^([0-9০-৯]{1,3}[A-Za-zক-হ]{0,3})\s*[.।]?\s*$"), r"\1. "),   # a bare number: "4A", "91F"
+]
+
+
+def _parse_section_label(text: str, toc: bool = False) -> tuple[str, str]:
     text = normalize(text)
+    for pattern, repl in _LABEL_FIXES + (_TOC_LABEL_FIXES if toc else []):
+        text = pattern.sub(repl, text, count=1)
     m = SECTION_LABEL_RE.match(text)
     if not m:
         return "", re.sub(r"\s+", " ", text).strip()
@@ -180,7 +216,7 @@ def _toc(soup: BeautifulSoup, act_id: int) -> list[SectionRef]:
             sid = int(m.group(2))
             if any(r.section_id == sid for r in refs):
                 continue
-            number, title = _parse_section_label(_block_text(node))
+            number, title = _parse_section_label(_block_text(node), toc=True)
             inherited = False
             if not number and last_number and title.lower() not in ("preamble", "প্রস্তাবনা"):
                 number, inherited = last_number, True
@@ -241,7 +277,7 @@ def _parse_act_generic(soup: BeautifulSoup, act_id: int, url: str | None) -> Act
                 sid = int(m.group(2))
                 if any(s.section_id == sid for s in sections):
                     continue
-                number, title = _parse_section_label(node.get_text(" "))
+                number, title = _parse_section_label(node.get_text(" "), toc=True)
                 sections.append(
                     SectionRef(
                         section_id=sid,
@@ -366,7 +402,7 @@ def parse_section(html: str, ref: SectionRef, act: Act) -> Section:
             footnotes.append(f"{num}. {note}" if num else note)
             note_tags.append(li)
 
-    omitted = bool(OMITTED_RE.match(text)) or title.strip("[] ").lower() in ("repealed", "omitted")
+    omitted = is_omitted(text, title)
     return Section(
         act_id=act.act_id,
         section_id=ref.section_id,
@@ -450,5 +486,5 @@ def _parse_section_generic(soup: BeautifulSoup, ref: SectionRef, act: Act) -> Se
         act_refs=act_refs,
         part=ref.part,
         heading=ref.heading,
-        omitted=bool(OMITTED_RE.match(text)),
+        omitted=is_omitted(text),
     )
