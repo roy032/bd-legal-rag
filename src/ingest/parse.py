@@ -2,24 +2,34 @@
 
 Page types (observed on the live site):
   index   : /laws-of-bangladesh-chronological-index.html  -> links to /act-{id}.html
-  act     : /act-{id}.html  -> title (h3), act number (h4), date "[ ... ]",
-            preamble, then a table of contents: chapter headings as plain text,
-            sections as links to /act-{id}/section-{sid}.html
-  section : /act-{id}/section-{sid}.html -> the section body
+  act     : /act-{id}.html  -> title (h3), act number (h4), date (.publish-date),
+            an optional repeal notice (section.bt-act-repealed), the long title and
+            preamble (.lineremove), then the table of contents (section.search-here):
+            .act-part-group / .act-chapter-group / .act-section-head headings and
+            p.act-section-name links to /act-{id}/section-{sid}.html
+  section : /act-{id}/section-{sid}.html -> .txt-head (section title),
+            .txt-details (the operative text), .footnoteListAll (amendment notes)
 
-The parser relies on URL patterns and document order rather than CSS class
-names, so it survives cosmetic changes to the site. If the site changes
-structurally, run with --save-raw and look at data/raw/ to adjust.
+The site's own markup is used first because it is exact: the body of a section is
+one element, footnote markers are <span class="footnote">, and amendment notes
+are list items. Every page also carries a nav bar with ~60 volume links, the
+act header, and a copyright footer — a generic "text of the page" approach picks
+all of that up, which is exactly what the first version of this parser did.
+
+When those classes are missing (a layout change, or the synthetic fixtures in
+tests/), a structure-agnostic fallback based on URL patterns and document order
+takes over, so a redesign degrades quality instead of emptying the corpus.
 """
 from __future__ import annotations
 
+import copy
 import re
 
 from bs4 import BeautifulSoup, NavigableString, Tag
 
 from .fetch import BASE_URL
 from .models import Act, ActRef, Section, SectionRef
-from .textutils import bn_to_ascii_digits, detect_lang, extract_year, nfc, normalize
+from .textutils import bn_to_ascii_digits, detect_lang, extract_year, fix_legacy_bangla, nfc, normalize
 
 ACT_HREF = re.compile(r"/act-(\d+)\.html(?:\?.*)?$")
 SECTION_HREF = re.compile(r"/act-(\d+)/section-(\d+)\.html(?:\?.*)?$")
@@ -29,10 +39,12 @@ CHAPTER_RE = re.compile(nfc(
     r"^(?:(?:CHAPTER|Chapter|PART|Part)\s+[IVXLCDM\d]+[A-Z]?"
     r"|\S+\s+(?:অধ্যায়|পরিচ্ছেদ|ভাগ|খণ্ড|খন্ড)(?=$|\s|[-–—:]))"
 ))
-# "১৷ সংক্ষিপ্ত শিরোনাম", "25A. Punishment", "2. Definitions.-"
+# "১৷ সংক্ষিপ্ত শিরোনাম", "25A. Punishment", "2. Definitions.-", "৫ক৷ ..."
 SECTION_LABEL_RE = re.compile(r"^\s*([0-9০-৯]+[A-Za-zক-হ]{0,2})\s*[।৷.:)\-–]\s*(.*)$", re.S)
 TOC_MARKERS = {nfc(x) for x in {"সূচি", "সূচী", "ধারাসমূহ", "sections", "contents", "index"}}
 REPEALED_RE = re.compile(nfc(r"রহিত\s*করা\s*হইয়াছে|রহিত\s*হইয়াছে|\bRepealed\b"), re.I)
+OMITTED_RE = re.compile(nfc(r"^\s*(?:[0-9০-৯]+[A-Za-zক-হ]{0,2}\s*[।৷.:]\s*)?\[?\s*"
+                            r"(?:Repealed|Omitted|বিলুপ্ত|রহিত)\b.{0,200}$"), re.I | re.S)
 DATE_RE = re.compile(r"^\[\s*(.{4,60}?)\s*\]$")
 FOOTNOTE_RE = re.compile(nfc(
     r"^[0-9০-৯]+\s*[\S].*(প্রতিস্থাপিত|সন্নিবেশিত|বিলুপ্ত|সংযোজিত|রহিত|"
@@ -43,6 +55,9 @@ BOILERPLATE_LINES = {nfc(x) for x in {
     "বাংলা", "english", "|", "প্রিন্টেবল ভার্সন", "printable version", "print",
     "সূচি", "সূচী", "home", "হোম",
 }}
+# Decorative glyphs the site sprinkles into preambles ("♣WHEREAS").
+DECORATION = re.compile(r"[♣♠♦♥•]")
+BLOCK_TAGS = ("p", "div", "li", "br", "tr", "h1", "h2", "h3", "h4", "h5", "h6", "table", "ul", "ol")
 
 
 def _abs(href: str) -> str:
@@ -51,9 +66,33 @@ def _abs(href: str) -> str:
 
 def _clean_soup(html: str) -> BeautifulSoup:
     soup = BeautifulSoup(html, "lxml")
-    for t in soup(["script", "style", "noscript", "iframe", "form", "button", "select", "svg"]):
+    for t in soup(["script", "style", "noscript", "iframe", "button", "select", "svg"]):
         t.decompose()
     return soup
+
+
+def _clean_text(text: str) -> str:
+    return normalize(fix_legacy_bangla(DECORATION.sub("", text)))
+
+
+def _block_text(tag: Tag | None, drop_markers: bool = True) -> str:
+    """Visible text of one element, with block boundaries as line breaks and
+    inline footnote markers (<span class="footnote"><sup>2</sup></span>) removed."""
+    if tag is None:
+        return ""
+    tag = copy.copy(tag)
+    if drop_markers:
+        for t in tag.select("span.footnote, sup"):
+            t.decompose()
+    for t in tag.find_all(BLOCK_TAGS):
+        t.insert_before("\n")
+        t.insert_after("\n")
+    return _clean_text(tag.get_text(""))
+
+
+def _inline(tag: Tag | None) -> str:
+    """Single-line text (titles, headings)."""
+    return re.sub(r"\s+", " ", _block_text(tag)).strip()
 
 
 # ---------------------------------------------------------------- index
@@ -79,17 +118,110 @@ def _parse_section_label(text: str) -> tuple[str, str]:
     text = normalize(text)
     m = SECTION_LABEL_RE.match(text)
     if not m:
-        return "", text
+        return "", re.sub(r"\s+", " ", text).strip()
     number, title = m.group(1), m.group(2).strip()
-    title = re.sub(r"[।.\s\-–:]+$", "", title)
+    title = re.sub(r"[।.\s\-–:]+$", "", re.sub(r"\s+", " ", title))
     return number, title
+
+
+def _join_heading(no: str, name: str) -> str | None:
+    no, name = no.strip(), name.strip()
+    if no and name:
+        return f"{no} - {name}"
+    return no or name or None
+
+
+def _act_header(soup: BeautifulSoup) -> tuple[str, str | None, str | None]:
+    """Title, act number and date from the act banner."""
+    banner = soup.find("section", class_="bg-act-section")
+    h3 = banner.find("h3") if banner else None
+    h4 = banner.find("h4") if banner else None
+    title = _inline(h3)
+    number = _inline(h4).strip("() ").strip() or None
+    if number:
+        number = re.sub(r"\s+", " ", number)
+    date_tag = soup.find(class_="publish-date")
+    date = None
+    if date_tag:
+        date = _inline(date_tag).strip("[] ").strip() or None
+    return title, number, date
+
+
+def _toc(soup: BeautifulSoup, act_id: int) -> list[SectionRef]:
+    toc = soup.find("section", class_="search-here")
+    if toc is None:
+        return []
+    refs: list[SectionRef] = []
+    part = chapter = heading = None
+    last_number = ""
+    for node in toc.find_all(True):
+        classes = node.get("class") or []
+        if "act-part-group" in classes:
+            part = _join_heading(_inline(node.find(class_="act-part-no")),
+                                 _inline(node.find(class_="act-part-name")))
+            chapter = heading = None
+        elif "act-chapter-group" in classes:
+            chapter = _join_heading(_inline(node.find(class_="act-chapter-no")),
+                                    _inline(node.find(class_="act-chapter-name")))
+            heading = None
+        elif "act-section-head" in classes:
+            heading = _inline(node) or None
+        elif node.name == "a" and isinstance(node.get("href"), str):
+            m = SECTION_HREF.search(node["href"])
+            if not m or int(m.group(1)) != act_id:
+                continue
+            sid = int(m.group(2))
+            if any(r.section_id == sid for r in refs):
+                continue
+            number, title = _parse_section_label(_block_text(node))
+            inherited = False
+            if not number and last_number and title.lower() not in ("preamble", "প্রস্তাবনা"):
+                number, inherited = last_number, True
+            if number and not inherited:
+                last_number = number
+            refs.append(SectionRef(
+                section_id=sid, number=number, number_ascii=bn_to_ascii_digits(number),
+                title=title, chapter=chapter, url=_abs(f"act-{act_id}/section-{sid}.html"),
+                part=part, heading=heading, inherited_number=inherited))
+    return refs
 
 
 def parse_act(html: str, act_id: int, url: str | None = None) -> Act:
     soup = _clean_soup(html)
-    body = soup.body or soup
+    title, act_number, date = _act_header(soup)
+    sections = _toc(soup, act_id)
+    if not title or not sections:
+        return _parse_act_generic(soup, act_id, url)
 
-    # Walk the document in order: chapter headings are plain text, sections are links.
+    notice = soup.find("section", class_="bt-act-repealed")
+    repeal_note = _inline(notice) or None if notice else None
+    pre = soup.find(class_="lineremove")
+    preamble = _block_text(pre) or None
+    if preamble:
+        preamble = re.sub(r"^\s*Preamble\s*", "", preamble).strip() or None
+
+    lang_text = " ".join([title, preamble or ""] + [s.title for s in sections[:40]])
+    return Act(
+        act_id=act_id,
+        title=title,
+        act_number=act_number,
+        date=date,
+        preamble=preamble,
+        year=extract_year(title),
+        language=detect_lang(lang_text),
+        repealed=repeal_note is not None or soup.find(class_="bn-repealed") is not None,
+        url=url or _abs(f"act-{act_id}.html"),
+        sections=sections,
+        repeal_note=repeal_note,
+    )
+
+
+def _parse_act_generic(soup: BeautifulSoup, act_id: int, url: str | None) -> Act:
+    """Structure-agnostic fallback: URL patterns and document order only."""
+    body = soup.body or soup
+    for t in body.find_all("form"):
+        t.unwrap()
+
     sections: list[SectionRef] = []
     chapter: str | None = None
     for node in body.descendants:
@@ -118,14 +250,13 @@ def parse_act(html: str, act_id: int, url: str | None = None) -> Act:
             if text and len(text) < 200 and CHAPTER_RE.match(text):
                 chapter = text
 
-    # Header fields from the text lines above the table of contents.
     lines = [ln for ln in normalize(body.get_text("\n")).splitlines() if ln]
     title_tag = body.find("h3")
     title = normalize(title_tag.get_text(" ")) if title_tag else ""
     if not title and soup.title:
         title = normalize(soup.title.get_text()).split("|")[0].strip()
 
-    act_number = date = preamble = None
+    act_number = date = None
     try:
         start = lines.index(title) + 1
     except ValueError:
@@ -146,7 +277,7 @@ def parse_act(html: str, act_id: int, url: str | None = None) -> Act:
                 date = date_match.group(1)
             else:
                 rest.append(ln)
-        elif date is not None:
+        else:
             rest.append(ln)
     preamble = " ".join(rest).strip() or None
 
@@ -167,6 +298,85 @@ def parse_act(html: str, act_id: int, url: str | None = None) -> Act:
 
 # ---------------------------------------------------------------- section page
 
+def _act_refs(tags: list[Tag], own_act: int) -> list[dict]:
+    """Cross-ACT references: the site links "Companies Act, 1994" to /act-788.html.
+    Capturing the id here is what lets the agent follow a reference into another
+    statute later; recovering it from the text alone is much harder."""
+    refs: list[dict] = []
+    for tag in tags:
+        for a in tag.find_all("a", href=True):
+            href = a.get("href")
+            if not isinstance(href, str):
+                continue
+            m = ACT_HREF.search(href)
+            title = _inline(a)
+            if m and int(m.group(1)) != own_act and title:
+                entry = {"act_id": int(m.group(1)), "title": title}
+                if entry not in refs:
+                    refs.append(entry)
+    return refs
+
+
+def _marker_numbers(tag: Tag) -> set[str]:
+    """Footnote numbers referenced from inside this element."""
+    nums = (bn_to_ascii_digits(s.get_text("", strip=True)) for s in tag.select("span.footnote sup"))
+    return {n for n in nums if n}
+
+
+def parse_section(html: str, ref: SectionRef, act: Act) -> Section:
+    soup = _clean_soup(html)
+    details = soup.find(class_="txt-details")
+    if details is None:
+        return _parse_section_generic(soup, ref, act)
+
+    text = _block_text(details)
+    head = soup.find(class_="txt-head")
+    title = ref.title or _inline(head)
+
+    # Page-level context, used when the table of contents did not carry it.
+    chapter = ref.chapter
+    if chapter is None and (grp := soup.find(class_="act-chapter-group")):
+        chapter = _join_heading(_inline(grp.find(class_="act-chapter-no")),
+                                _inline(grp.find(class_="act-chapter-name")))
+    part = ref.part
+    if part is None and (grp := soup.find(class_="act-part-group")):
+        part = _join_heading(_inline(grp.find(class_="act-part-no")),
+                             _inline(grp.find(class_="act-part-name")))
+
+    # Amendment notes: keep only the ones this section's text points at. Note 1 on
+    # most pages belongs to the act title ("Throughout this Act ... substituted")
+    # and would otherwise mark every section as amended.
+    used = _marker_numbers(details) | (_marker_numbers(head) if head else set())
+    footnotes: list[str] = []
+    note_tags: list[Tag] = []
+    for li in soup.select(".footnoteListAll li"):
+        num_tag = li.find(["h6", "sup"])
+        num = bn_to_ascii_digits(num_tag.get_text("", strip=True)) if num_tag else ""
+        if num_tag:
+            num_tag.decompose()
+        note = _inline(li)
+        if note and num in used:
+            footnotes.append(f"{num}. {note}" if num else note)
+            note_tags.append(li)
+
+    omitted = bool(OMITTED_RE.match(text)) or title.strip("[] ").lower() in ("repealed", "omitted")
+    return Section(
+        act_id=act.act_id,
+        section_id=ref.section_id,
+        number=ref.number,
+        number_ascii=ref.number_ascii,
+        title=title,
+        chapter=chapter,
+        text=text,
+        footnotes=footnotes,
+        url=ref.url,
+        act_refs=_act_refs([details, *note_tags], act.act_id),
+        part=part,
+        heading=ref.heading,
+        omitted=omitted,
+    )
+
+
 def _nonlink_len(tag: Tag) -> int:
     total = len(tag.get_text(" ", strip=True))
     links = sum(len(a.get_text(" ", strip=True)) for a in tag.find_all("a"))
@@ -174,11 +384,7 @@ def _nonlink_len(tag: Tag) -> int:
 
 
 def _main_block(soup: BeautifulSoup) -> Tag:
-    """Tightest container that still holds >= 80% of the page's non-link text.
-
-    Nav bars and footers are either link-heavy or small, so this lands on the
-    content column without needing to know the site's CSS classes.
-    """
+    """Tightest container that still holds >= 80% of the page's non-link text."""
     body = soup.body or soup
     for t in body.find_all(["nav", "header", "footer"]):
         t.decompose()
@@ -194,24 +400,9 @@ def _main_block(soup: BeautifulSoup) -> Tag:
     return best
 
 
-def parse_section(html: str, ref: SectionRef, act: Act) -> Section:
-    soup = _clean_soup(html)
+def _parse_section_generic(soup: BeautifulSoup, ref: SectionRef, act: Act) -> Section:
     block = _main_block(soup)
-
-    # Cross-ACT references: the site links "Companies Act, 1994" to /act-788.html.
-    # Capturing the id here is what lets the agent follow a reference into
-    # another statute later; recovering it from the text alone is much harder.
-    act_refs: list[dict] = []
-    for a in block.find_all("a", href=True):
-        href = a.get("href")
-        if not isinstance(href, str):
-            continue
-        m = ACT_HREF.search(href)
-        title = normalize(a.get_text(" "))
-        if m and int(m.group(1)) != act.act_id and title:
-            entry = {"act_id": int(m.group(1)), "title": title}
-            if entry not in act_refs:
-                act_refs.append(entry)
+    act_refs = _act_refs([block], act.act_id)
     lines = list(normalize(block.get_text("\n")).splitlines())
 
     act_title_variants = {act.title, f"[{act.title}]", f"[ {act.title} ]"}
@@ -222,7 +413,6 @@ def parse_section(html: str, ref: SectionRef, act: Act) -> Section:
             continue
         cleaned.append(ln)
 
-    # Drop the heading line(s) if they just repeat "number. title".
     while cleaned and not cleaned[0].strip():
         cleaned.pop(0)
     while cleaned and cleaned[0].strip():
@@ -233,13 +423,13 @@ def parse_section(html: str, ref: SectionRef, act: Act) -> Section:
         else:
             break
 
-    # Amendment footnotes live at the bottom of the page.
     footnotes: list[str] = []
     while cleaned and (not cleaned[-1].strip() or FOOTNOTE_RE.match(cleaned[-1].strip())):
         ln = cleaned.pop().strip()
         if ln:
             footnotes.insert(0, ln)
 
+    text = normalize("\n".join(cleaned))
     return Section(
         act_id=act.act_id,
         section_id=ref.section_id,
@@ -247,8 +437,11 @@ def parse_section(html: str, ref: SectionRef, act: Act) -> Section:
         number_ascii=ref.number_ascii,
         title=ref.title,
         chapter=ref.chapter,
-        text=normalize("\n".join(cleaned)),
+        text=text,
         footnotes=footnotes,
         url=ref.url,
         act_refs=act_refs,
+        part=ref.part,
+        heading=ref.heading,
+        omitted=bool(OMITTED_RE.match(text)),
     )

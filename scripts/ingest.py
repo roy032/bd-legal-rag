@@ -5,11 +5,15 @@ Examples
   # Try it on one act (Insurance Act, 2010)
   python scripts/ingest.py --act-ids 1037 --show 3
 
-  # A starter corpus: every act since 2000 whose title mentions "আইন" (max 30)
-  python scripts/ingest.py --year-from 2000 --match "আইন" --limit 30
+  # The whole corpus (every act in the chronological index). Hours at a polite
+  # delay; safe to stop and re-run — pages already in data/raw are not refetched.
+  python scripts/ingest.py --delay 0.5
+
+  # Re-parse everything already downloaded, without touching the site
+  python scripts/ingest.py --offline
 
   # Re-chunk with a different size without re-downloading anything
-  python scripts/ingest.py --act-ids 1037 11 --max-chars 1200
+  python scripts/ingest.py --act-ids 1037 11 --max-chars 1200 --offline
 """
 from __future__ import annotations
 
@@ -29,9 +33,30 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from ingest.chunk import act_overview_chunk, chunk_section  # noqa: E402
 from ingest.fetch import BASE_URL, Fetcher  # noqa: E402
 from ingest.parse import parse_act, parse_index, parse_section  # noqa: E402
+from ingest.textutils import extract_year  # noqa: E402
 
 INDEX_URL = f"{BASE_URL}/laws-of-bangladesh-chronological-index.html"
 log = logging.getLogger("ingest")
+
+
+def select_acts(fetcher: Fetcher, args) -> list[tuple[int, str | None]]:
+    if args.act_ids:
+        return [(i, None) for i in args.act_ids]
+    refs = parse_index(fetcher.get(INDEX_URL))
+    log.info("index lists %d acts", len(refs))
+    sel = []
+    for r in refs:
+        y = extract_year(r.title)
+        if args.match and not re.search(args.match, r.title, re.I):
+            continue
+        if args.year_from and (y is None or y < args.year_from):
+            continue
+        if args.year_to and (y is None or y > args.year_to):
+            continue
+        sel.append(r)
+    if args.limit:
+        sel = sel[: args.limit]
+    return [(r.act_id, r.title) for r in sel]
 
 
 def main() -> None:
@@ -43,6 +68,8 @@ def main() -> None:
     ap.add_argument("--limit", type=int, help="max number of acts")
     ap.add_argument("--max-chars", type=int, default=1800, help="max chars per chunk body")
     ap.add_argument("--delay", type=float, default=1.0, help="seconds between requests (be polite)")
+    ap.add_argument("--offline", action="store_true",
+                    help="use only pages already in the cache; skip anything not downloaded")
     ap.add_argument("--out", default="data/processed")
     ap.add_argument("--cache", default="data/raw")
     ap.add_argument("--show", type=int, default=0, help="print N random chunks at the end")
@@ -51,35 +78,18 @@ def main() -> None:
 
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
-    fetcher = Fetcher(cache_dir=args.cache, delay=args.delay)
+    fetcher = Fetcher(cache_dir=args.cache, delay=args.delay, offline=args.offline)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
-    # 1. Which acts?
-    if args.act_ids:
-        targets = [(i, None) for i in args.act_ids]
-    else:
-        refs = parse_index(fetcher.get(INDEX_URL))
-        log.info("index lists %d acts", len(refs))
-        from ingest.textutils import extract_year
-        sel = []
-        for r in refs:
-            y = extract_year(r.title)
-            if args.match and not re.search(args.match, r.title, re.I):
-                continue
-            if args.year_from and (y is None or y < args.year_from):
-                continue
-            if args.year_to and (y is None or y > args.year_to):
-                continue
-            sel.append(r)
-        if args.limit:
-            sel = sel[: args.limit]
-        targets = [(r.act_id, r.title) for r in sel]
-    log.info("processing %d acts", len(targets))
+    targets = select_acts(fetcher, args)
+    log.info("processing %d acts%s", len(targets), " (offline)" if args.offline else "")
 
-    # 2. Parse + chunk
-    stats = Counter()
-    langs, lengths, all_chunks = Counter(), [], []
+    stats: Counter = Counter()
+    langs: Counter = Counter()
+    lengths: list[int] = []
+    sample: list = []
+    failures: list[dict] = []
     t0 = time.time()
     with open(out / "acts.jsonl", "w", encoding="utf-8") as fa, \
          open(out / "sections.jsonl", "w", encoding="utf-8") as fs, \
@@ -88,15 +98,21 @@ def main() -> None:
             try:
                 act = parse_act(fetcher.get(f"{BASE_URL}/act-{act_id}.html"), act_id)
             except Exception as e:  # keep going; one bad page shouldn't kill the run
-                log.error("act %s failed: %s", act_id, e)
+                (log.debug if args.offline else log.error)("act %s failed: %s", act_id, e)
                 stats["acts_failed"] += 1
+                failures.append({"act_id": act_id, "url": f"{BASE_URL}/act-{act_id}.html",
+                                 "error": f"{type(e).__name__}: {e}"})
                 continue
-            log.info("[%d/%d] %s — %d sections%s", n, len(targets), act.title,
-                     len(act.sections), " (REPEALED)" if act.repealed else "")
+            if n % 25 == 0 or n == len(targets):
+                rate = n / max(time.time() - t0, 1e-9)
+                log.info("[%d/%d] %s — %d sections%s | %.2f acts/s, eta %.0f min", n, len(targets),
+                         act.title, len(act.sections), " (REPEALED)" if act.repealed else "",
+                         rate, (len(targets) - n) / max(rate, 1e-9) / 60)
             if not act.sections:
                 stats["acts_without_sections"] += 1
             fa.write(json.dumps(asdict(act), ensure_ascii=False) + "\n")
             stats["acts"] += 1
+            stats["acts_repealed"] += act.repealed
             langs[act.language] += 1
 
             chunks = [act_overview_chunk(act)]
@@ -104,15 +120,16 @@ def main() -> None:
                 try:
                     sec = parse_section(fetcher.get(ref.url), ref, act)
                 except Exception as e:
-                    log.error("  section %s failed: %s", ref.url, e)
                     stats["sections_failed"] += 1
+                    failures.append({"act_id": act_id, "url": ref.url,
+                                     "error": f"{type(e).__name__}: {e}"})
                     continue
                 stats["sections"] += 1
                 if not sec.text:
                     stats["sections_empty"] += 1
-                    log.warning("  empty text: %s", ref.url)
-                if sec.footnotes:
-                    stats["sections_amended"] += 1
+                    log.debug("  empty text: %s", ref.url)
+                stats["sections_amended"] += bool(sec.footnotes)
+                stats["sections_omitted"] += sec.omitted
                 fs.write(json.dumps(asdict(sec), ensure_ascii=False) + "\n")
                 chunks.extend(chunk_section(act, sec, max_chars=args.max_chars))
             for c in chunks:
@@ -120,9 +137,14 @@ def main() -> None:
                 lengths.append(c.metadata["char_len"])
                 stats["chunks"] += 1
                 stats["chunks_continuation"] += c.metadata.get("part", 1) > 1
-            all_chunks.extend(chunks)
+            if len(sample) < 2000:
+                sample.extend(chunks[:3])
 
-    # 3. Report — look at these numbers every time you change the parser.
+    with open(out / "failures.jsonl", "w", encoding="utf-8") as ff:
+        for row in failures:
+            ff.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    # Report — look at these numbers every time you change the parser.
     lengths.sort()
     report = {
         **stats,
@@ -133,12 +155,15 @@ def main() -> None:
             "p95": lengths[int(len(lengths) * 0.95)] if lengths else 0,
             "max": lengths[-1] if lengths else 0,
         },
+        "offline": args.offline,
         "seconds": round(time.time() - t0, 1),
     }
     (out / "stats.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False, indent=2))
+    if failures:
+        print(f"{len(failures)} page(s) failed — see {out / 'failures.jsonl'}; re-run to retry them.")
 
-    for c in random.sample(all_chunks, min(args.show, len(all_chunks))):
+    for c in random.sample(sample, min(args.show, len(sample))):
         print("\n" + "=" * 80 + f"\n{c.chunk_id}  {json.dumps({k: c.metadata[k] for k in ('type', 'url')}, ensure_ascii=False)}\n" + "-" * 80)
         print(c.text[:1200])
 

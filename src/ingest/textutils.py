@@ -46,6 +46,9 @@ def detect_lang(text: str) -> str:
 def normalize(text: str) -> str:
     """Unicode-normalize and tidy whitespace, keeping paragraph breaks."""
     text = unicodedata.normalize("NFC", text)
+    # Khanda ta: 'ত্' + ZWJ is the legacy spelling of 'ৎ'. Folding it on both the
+    # corpus and the query side is what lets "বলবত্‍" match "বলবৎ".
+    text = text.replace("ত্\u200d", "ৎ")
     text = text.replace(" ", " ").replace("‌", "").replace("​", "")
     # The site uses both '।' (dari) and '৷' (Bangla isshar-like) as full stop.
     text = text.replace("৷", "।")
@@ -61,6 +64,30 @@ def normalize(text: str) -> str:
             out.append(ln)
             blank = False
     return "\n".join(out).strip()
+
+
+# Artefacts of the site's SutonnyMJ -> Unicode conversion. Only patterns that
+# never occur in correctly spelled words are listed: a bare 'তিগ' is left alone
+# because it is legitimate in ব্যক্তিগত; only 'েতিগ' / 'ংতিগ' are rewritten.
+_LEGACY_FIXES = [
+    (re.compile("ত্(?=[সকপখফশ])"), "ৎ"),   # বত্সর -> বৎসর (ত্স is never a real conjunct)
+    (re.compile("অা"), "আ"),              # অ + া -> আ (অাইন -> আইন)
+    (re.compile("(?<=[েং])তিগ"), "ক্ষি"),   # পরিপ্রেতিগতে -> পরিপ্রেক্ষিতে, সংতিগপ্ত -> সংক্ষিপ্ত
+    (re.compile("ল([িীুূে]?)\u00ad"), "ল্ল\\1"),  # উলি<SHY>খিত -> উল্লিখিত
+    (re.compile("\u00ad"), ""),           # any other soft hyphen
+    (re.compile("ন্ত্ম"), "ন্ত"),           # স্থানান্ত্মর -> স্থানান্তর
+    (re.compile("তর্ৃ"), "র্তৃ"),           # কতর্ৃক -> কর্তৃক
+    (re.compile("(?<=[ঀ-৿])তেগ"), "ক্ষে"),  # কর্তৃপতেগর -> কর্তৃপক্ষের
+    (re.compile("(?<![ঀ-৿])তগ(?=[ঀ-৿])"), "ক্ষ"),  # তগতিপূরণ -> ক্ষতিপূরণ
+]
+
+
+def fix_legacy_bangla(text: str) -> str:
+    """Repair the handful of mis-encoded conjuncts that bdlaws pages contain."""
+    text = unicodedata.normalize("NFC", text)
+    for pattern, repl in _LEGACY_FIXES:
+        text = pattern.sub(repl, text)
+    return text
 
 
 _YEAR = re.compile(r"(1[6-9]\d\d|20\d\d)")
