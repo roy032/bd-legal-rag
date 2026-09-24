@@ -70,15 +70,22 @@ def normalize(text: str) -> str:
 # never occur in correctly spelled words are listed: a bare 'তিগ' is left alone
 # because it is legitimate in ব্যক্তিগত; only 'েতিগ' / 'ংতিগ' are rewritten.
 _LEGACY_FIXES = [
-    (re.compile("ত্(?=[সকপখফশ])"), "ৎ"),   # বত্সর -> বৎসর (ত্স is never a real conjunct)
-    (re.compile("অা"), "আ"),              # অ + া -> আ (অাইন -> আইন)
-    (re.compile("(?<=[েং])তিগ"), "ক্ষি"),   # পরিপ্রেতিগতে -> পরিপ্রেক্ষিতে, সংতিগপ্ত -> সংক্ষিপ্ত
+    (re.compile("অা"), "আ"),                  # অ + া -> আ (অাইন -> আইন)
+    (re.compile("তৃর্"), "র্তৃ"),               # কতৃর্ক -> কর্তৃক
+    (re.compile("তর্ৃ"), "র্তৃ"),               # কতর্ৃক -> কর্তৃক
+    # ক্ষ was mapped to "ত্মগ" / "তগ" / "তিগ" by the old font converter:
+    (re.compile("(?<!আ)ত্ম([েিীা]?)গ"), "ক্ষ\\1"),  # ত্মেগত্রে -> ক্ষেত্রে, ত্মগমতা -> ক্ষমতা (not আত্মগোপন)
+    (re.compile("তেগ"), "ক্ষে"),                # তেগত্রে -> ক্ষেত্রে, কর্তৃপতেগর -> কর্তৃপক্ষের
+    (re.compile("(?<=[েং])তিগ"), "ক্ষি"),       # পরিপ্রেতিগতে -> পরিপ্রেক্ষিতে (plain তিগ is real: ব্যক্তিগত)
+    (re.compile("(?<![্ঀ-৿])তগ(?=[ঀ-৿])"), "ক্ষ"),   # তগতিপূরণ -> ক্ষতিপূরণ (word-initial)
+    (re.compile("(?<!্)তগ(?=[া্কর])"), "ক্ষ"),  # সাতগ্য -> সাক্ষ্য, পরীতগা -> পরীক্ষা (not যতগুলি, হস্তগত)
+    (re.compile("স্ত্ম"), "স্ত"),               # হস্ত্মান্তর -> হস্তান্তর
+    (re.compile("ন্ত্ম"), "ন্ত"),               # স্থানান্ত্মর -> স্থানান্তর
     (re.compile("ল([িীুূে]?)\u00ad"), "ল্ল\\1"),  # উলি<SHY>খিত -> উল্লিখিত
-    (re.compile("\u00ad"), ""),           # any other soft hyphen
-    (re.compile("ন্ত্ম"), "ন্ত"),           # স্থানান্ত্মর -> স্থানান্তর
-    (re.compile("তর্ৃ"), "র্তৃ"),           # কতর্ৃক -> কর্তৃক
-    (re.compile("(?<=[ঀ-৿])তেগ"), "ক্ষে"),  # কর্তৃপতেগর -> কর্তৃপক্ষের
-    (re.compile("(?<![ঀ-৿])তগ(?=[ঀ-৿])"), "ক্ষ"),  # তগতিপূরণ -> ক্ষতিপূরণ
+    (re.compile("\u00ad"), ""),               # any other soft hyphen
+    (re.compile("ে্য"), "্যে"),                 # vowel sign before য-ফলা: লক্ষে্য -> লক্ষ্যে
+    # Khanda ta last, so it also catches ত্ produced by the fixes above.
+    (re.compile("ত্(?=[সকপখফশ]|$|[^ঀ-৿])"), "ৎ"),  # বত্সর -> বৎসর, তত্ক্ষণাত্ -> তৎক্ষণাৎ
 ]
 
 

@@ -40,6 +40,7 @@
   .badge { font-size:12px; padding:3px 9px; border-radius:999px; border:1px solid var(--line);
     color:var(--muted); }
   .badge.warn { color:var(--warn); border-color:var(--warn); }
+  .badge.ok { color:var(--accent); border-color:var(--accent); }
   .badge.bad { color:var(--bad); border-color:var(--bad); }
   ol.sources { padding-left:20px; margin:8px 0 0; font-size:14px; }
   ol.sources li { margin-bottom:6px; }
@@ -93,8 +94,9 @@
 </div>
 <script>
 const $ = id => document.getElementById(id);
-const EXAMPLES = ["ধারা ৩০২ কী বলে?", "What is causing death by negligence?", "বীমা আইনে সংজ্ঞা কী?"];
-$("examples").innerHTML = EXAMPLES.map(e => `<button class="ex" data-q="${e}">${e}</button>`).join(" · ");
+const EXAMPLES = ["দণ্ডবিধির ধারা ৩০২ কী বলে?", "When can the police arrest without a warrant?",
+                  "শ্রমিকের দৈনিক কর্মঘণ্টা কত?", "What happens if a cheque bounces?"];
+$("examples").innerHTML = EXAMPLES.map(e => `<button class="ex" data-q="${e.replace(/"/g, "&quot;")}">${e}</button>`).join(" · ");
 $("examples").onclick = e => { if (e.target.dataset.q) { $("q").value = e.target.dataset.q; $("f").requestSubmit(); } };
 
 function badge(text, cls="") { const b = document.createElement("span"); b.className = "badge " + cls; b.textContent = text; $("badges").appendChild(b); }
@@ -158,12 +160,20 @@ async function stream(question, k) {
   }
 }
 
+// Everything below is data from the corpus or the model: escape before it
+// touches innerHTML (a section title or a tool name must never become markup).
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c =>
+  ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+const safeUrl = u => /^https?:\/\//i.test(u || "") ? esc(u) : "";
+
 function showSources(sources) {
   if (!sources || !sources.length) return;
   $("srcwrap").hidden = false;
   $("sources").innerHTML = sources.map(s =>
-    `<li>[${s.n}] ${s.citation}${s.section_title ? " — " + s.section_title : ""}
-     ${s.url ? `· <a href="${s.url}" target="_blank" rel="noopener">official text</a>` : ""}</li>`).join("");
+    `<li>[${esc(s.n)}] ${esc(s.citation)}${s.section_title ? " — " + esc(s.section_title) : ""}
+     ${safeUrl(s.url) ? `· <a href="${safeUrl(s.url)}" target="_blank" rel="noopener">official text</a>` : ""}
+     ${s.live_check === "current" ? `<span class="badge ok">✓ matches the site today</span>` :
+       s.live_check === "changed" ? `<span class="badge warn">⚠ changed on the site since indexing</span>` : ""}</li>`).join("");
 }
 
 let currentId = null;
@@ -209,8 +219,8 @@ function render(d, streamed=false) {
   if (d.trace && d.trace.length) {
     $("tracewrap").hidden = false;
     $("trace").innerHTML = d.trace.map(t =>
-      `<li>step ${t.step}: ${t.tool || t.type}${t.parallel > 1 ? " ×" + t.parallel : ""}` +
-      `${t.new_excerpts != null ? " → +" + t.new_excerpts + " excerpts" : ""}</li>`).join("");
+      `<li>step ${esc(t.step)}: ${esc(t.tool || t.type)}${t.parallel > 1 ? " ×" + esc(t.parallel) : ""}` +
+      `${t.new_excerpts != null ? " → +" + esc(t.new_excerpts) + " excerpts" : ""}</li>`).join("");
   } else { $("tracewrap").hidden = true; }
   currentId = d.id || null;
   $("fbwrap").hidden = !currentId;

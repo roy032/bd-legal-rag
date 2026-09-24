@@ -83,3 +83,16 @@ class TestResolver(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAnswerNormalisation(unittest.TestCase):
+    def test_bangla_and_grouped_citations(self):
+        from rag.answer import normalize_answer
+        self.assertEqual(normalize_answer("দণ্ড হবে [১]। আরও [১, ৩]।"), "দণ্ড হবে [1]। আরও [1][3]।")
+        self.assertEqual(normalize_answer("See [2–4]."), "See [2][3][4].")
+
+    def test_markdown_refusal_is_a_refusal(self):
+        from rag.answer import is_refusal, normalize_answer
+        self.assertEqual(normalize_answer("**NOT_FOUND:** no provision"), "NOT_FOUND: no provision")
+        self.assertTrue(is_refusal("  ANSWER: NOT_FOUND: x"))
+        self.assertFalse(is_refusal("Not found guilty by the court [1]."))

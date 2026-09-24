@@ -71,5 +71,38 @@ class TestPageCache(unittest.TestCase):
             self.assertEqual(list(Path(tmp).glob("*.html")), [])
 
 
+class TestUpdatePlan(unittest.TestCase):
+    """--update downloads new acts, and re-downloads only the acts they amend."""
+
+    def test_new_amending_act_marks_its_target_for_refresh(self):
+        import importlib.util
+        import json
+        spec = importlib.util.spec_from_file_location("ingest_script", ROOT / "scripts" / "ingest.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        act_page = ('<section class="bg-act-section"><h3>{t}</h3><h4>(x)</h4></section>'
+                    '<section class="search-here"><p class="act-section-name">'
+                    '<a href="/act-{a}/section-{s}.html">1. Amendment of section 2</a></p></section>')
+        sec_page = ('<div class="txt-head">x</div><div class="txt-details">1. In the '
+                    '<a href="/act-835.html">Nari o Shishu Act</a>, section 2 is substituted.</div>')
+        pages = {
+            "http://bdlaws.minlaw.gov.bd/act-1714.html": act_page.format(t="Amendment Act, 2026", a=1714, s=9),
+            "http://bdlaws.minlaw.gov.bd/act-1714/section-9.html": sec_page,
+        }
+
+        class FakeFetcher:
+            def get(self, url, refresh=False):
+                return pages[url]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "manifest.json").write_text(json.dumps({"acts": {"11": "Penal", "835": "NS"}}))
+            targets = [(11, "The Penal Code, 1860"), (835, "নারী ও শিশু নির্যাতন দমন আইন, ২০০০"),
+                       (1714, "নারী ও শিশু নির্যাতন দমন (সংশোধন) আইন, ২০২৬")]
+            new, refresh = mod.plan_update(FakeFetcher(), targets, Path(tmp))
+        self.assertEqual(new, {1714})
+        self.assertEqual(refresh, {835})
+
+
 if __name__ == "__main__":
     unittest.main()

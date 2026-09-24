@@ -12,6 +12,9 @@ Examples
   # Shrink an existing page cache ~5x (pages are mostly navigation boilerplate)
   python scripts/ingest.py --compact-cache
 
+  # Keep the corpus current: only new acts + acts that new amendments touch
+  python scripts/ingest.py --update
+
   # Re-parse everything already downloaded, without touching the site
   python scripts/ingest.py --offline
 
@@ -41,13 +44,44 @@ from ingest.textutils import extract_year  # noqa: E402
 INDEX_URL = f"{BASE_URL}/laws-of-bangladesh-chronological-index.html"
 # The index marks repealed acts in the title itself: "... Act, 1980 [Repealed]", "... [রহিত]".
 REPEALED_IN_INDEX = re.compile(r"\[\s*(?:রহিত|Repealed)\s*\]", re.I)
+AMENDING_TITLE = re.compile(r"সংশোধন|রহিতকরণ|amendment|repeal", re.I)
+MANIFEST = "manifest.json"
+
+
+def plan_update(fetcher: Fetcher, targets: list[tuple[int, str | None]], out: Path) -> tuple[set[int], set[int]]:
+    """Which acts to (re)download in --update mode.
+
+    new      : in the site's index but not in the last run's manifest.
+    refresh  : older acts that a NEW amending act links to. bdlaws edits the
+               amended sections in place, so these are the only old pages that
+               can have changed — everything else is served from the cache.
+    """
+    manifest_path = out / MANIFEST
+    known: set[int] = set()
+    if manifest_path.exists():
+        known = {int(k) for k in json.loads(manifest_path.read_text(encoding="utf-8"))["acts"]}
+    selected = {aid for aid, _ in targets}
+    new = {aid for aid, _ in targets if aid not in known} if known else set()
+    refresh: set[int] = set()
+    for aid, title in targets:
+        if aid not in new or not AMENDING_TITLE.search(title or ""):
+            continue
+        try:
+            act = parse_act(fetcher.get(f"{BASE_URL}/act-{aid}.html"), aid)
+            for ref in act.sections:
+                sec = parse_section(fetcher.get(ref.url), ref, act)
+                refresh.update(r["act_id"] for r in sec.act_refs)
+        except Exception as e:  # an unreachable amending act must not stop the update
+            log.warning("could not read amending act %s: %s", aid, e)
+    refresh &= selected - new
+    return new, refresh
 log = logging.getLogger("ingest")
 
 
 def select_acts(fetcher: Fetcher, args) -> list[tuple[int, str | None]]:
     if args.act_ids:
         return [(i, None) for i in args.act_ids]
-    refs = parse_index(fetcher.get(INDEX_URL))
+    refs = parse_index(fetcher.get(INDEX_URL, refresh=args.update))
     log.info("index lists %d acts", len(refs))
     sel = []
     for r in refs:
@@ -81,6 +115,9 @@ def main() -> None:
                     help="store downloaded pages as plain .html instead of .html.gz")
     ap.add_argument("--compact-cache", action="store_true",
                     help="gzip every plain .html page already in the cache, then exit")
+    ap.add_argument("--update", action="store_true",
+                    help="re-read the site's index; download only new acts and the acts new "
+                         "amending acts point at; everything else comes from the cache")
     ap.add_argument("--offline", action="store_true",
                     help="use only pages already in the cache; skip anything not downloaded")
     ap.add_argument("--out", default="data/processed")
@@ -100,8 +137,15 @@ def main() -> None:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
+    if args.update and args.offline:
+        sys.exit("--update needs the network; drop --offline")
     targets = select_acts(fetcher, args)
     log.info("processing %d acts%s", len(targets), " (offline)" if args.offline else "")
+    refresh: set[int] = set()
+    if args.update:
+        new, refresh = plan_update(fetcher, targets, out)
+        log.info("update: %d new act(s), %d amended act(s) to re-download: %s",
+                 len(new), len(refresh), sorted(refresh)[:20])
 
     stats: Counter = Counter()
     langs: Counter = Counter()
@@ -114,7 +158,8 @@ def main() -> None:
          open(out / "chunks.jsonl", "w", encoding="utf-8") as fc:
         for n, (act_id, _) in enumerate(targets, 1):
             try:
-                act = parse_act(fetcher.get(f"{BASE_URL}/act-{act_id}.html"), act_id)
+                act = parse_act(fetcher.get(f"{BASE_URL}/act-{act_id}.html",
+                                            refresh=act_id in refresh), act_id)
             except Exception as e:  # keep going; one bad page shouldn't kill the run
                 (log.debug if args.offline else log.error)("act %s failed: %s", act_id, e)
                 stats["acts_failed"] += 1
@@ -136,7 +181,7 @@ def main() -> None:
             chunks = [act_overview_chunk(act)]
             for ref in act.sections:
                 try:
-                    sec = parse_section(fetcher.get(ref.url), ref, act)
+                    sec = parse_section(fetcher.get(ref.url, refresh=act_id in refresh), ref, act)
                 except Exception as e:
                     stats["sections_failed"] += 1
                     failures.append({"act_id": act_id, "url": ref.url,
@@ -158,6 +203,11 @@ def main() -> None:
             if len(sample) < 2000:
                 sample.extend(chunks[:3])
 
+    (out / MANIFEST).write_text(json.dumps({
+        "generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "acts": {str(aid): title for aid, title in targets},
+        "refreshed": sorted(refresh),
+    }, ensure_ascii=False, indent=1), encoding="utf-8")
     with open(out / "failures.jsonl", "w", encoding="utf-8") as ff:
         for row in failures:
             ff.write(json.dumps(row, ensure_ascii=False) + "\n")

@@ -120,7 +120,9 @@ class ServiceConfig:
     feedback_path: str = ""
     analytics_path: str = ""
     cors_origins: list[str] = field(default_factory=lambda: ["*"])
-    trust_proxy: bool = False        # honour X-Forwarded-For (only behind your own proxy)
+    trust_proxy: bool = False
+    verify_live: bool = False        # re-check cited sections against bdlaws (rag/verify.py)
+    cache_dir: str = "data/raw"        # honour X-Forwarded-For (only behind your own proxy)
 
     @classmethod
     def from_env(cls) -> ServiceConfig:
@@ -165,6 +167,8 @@ class ServiceConfig:
             analytics_path=_env_str("BDRAG_ANALYTICS", "data/queries.jsonl"),
             cors_origins=[o.strip() for o in _env_str("BDRAG_CORS", "*").split(",") if o.strip()],
             trust_proxy=_env_bool("BDRAG_TRUST_PROXY", False),
+            verify_live=_env_bool("BDRAG_VERIFY_LIVE", False),
+            cache_dir=_env_str("BDRAG_CACHE", "data/raw"),
         )
 
 
@@ -406,6 +410,24 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
             "disclaimer": "Informational only — not legal advice.",
         }
 
+    def live_statuses(ans, out: dict) -> None:
+        from ingest.fetch import Fetcher
+        from rag.verify import verify_cited
+
+        if "fetcher" not in state:
+            state["fetcher"] = Fetcher(cache_dir=cfg.cache_dir, delay=0.0, retries=1, timeout=5.0)
+        statuses = verify_cited(ans.hits, ans.cited, state["fetcher"])
+        for src in out["sources"]:
+            if src["n"] in statuses:
+                src["live_check"] = statuses[src["n"]]
+        if any(v == "changed" for v in statuses.values()):
+            metrics.inc("live_check_changed_total")
+
+    async def check_live(ans, out: dict) -> None:
+        """Opt-in: confirm the cited text is still what the site publishes."""
+        if cfg.verify_live and not ans.refused and ans.cited:
+            await run_in_threadpool(live_statuses, ans, out)
+
     def record_cost(ans) -> None:
         model = cfg.llm_model or (cfg.provider or "")
         prompt_chars = sum(len(h.body) for h in ans.hits) + len(ans.question) + 1500
@@ -472,6 +494,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
 
         answer_id = uuid.uuid4().hex[:10]
         out = serialize(ans, answer_id=answer_id)
+        await check_live(ans, out)
         answers.put(key, out)
         remember(answer_id, out, ans, client, use_agent)
         trace.finish(endpoint="ask", refused=ans.refused, agent=use_agent,
@@ -507,6 +530,8 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
                         record_cost(ans)
                         answer_id = uuid.uuid4().hex[:10]
                         out = serialize(ans, answer_id=answer_id)
+                        if cfg.verify_live and not ans.refused:
+                            live_statuses(ans, out)
                         remember(answer_id, out, ans, client, False)
                         yield sse("final", out)
                     else:

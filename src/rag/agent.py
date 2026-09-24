@@ -30,7 +30,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
-from .answer import REFUSAL_MARK, Answer, check_citations
+from .answer import REFUSAL_MARK, Answer, check_citations, normalize_answer
 from .guardrails import GuardConfig, repair_instruction, run_checks
 from .tools import EvidenceBook, SectionLookup, ToolBox
 
@@ -201,6 +201,7 @@ class LegalAgent:
             match = ANSWER_RE.search(final)
             final = match.group(1).strip() if match else final
 
+        final = normalize_answer(final)
         refused = final.startswith(REFUSAL_MARK)
         checks = {} if refused else run_checks(question, final, hits, cfg.guard)
         repaired = False
@@ -211,7 +212,7 @@ class LegalAgent:
                                       f"{repair_instruction(checks)}") or "").strip()
             calls += 1
             match = ANSWER_RE.search(retry)
-            retry = match.group(1).strip() if match else retry
+            retry = normalize_answer(match.group(1).strip() if match else retry)
             repaired = True
             retry_refused = retry.startswith(REFUSAL_MARK)
             retry_checks = {} if retry_refused else run_checks(question, retry, hits, cfg.guard)

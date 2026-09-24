@@ -5,7 +5,7 @@ import re
 import time
 from dataclasses import dataclass, field
 
-from ingest.textutils import detect_lang
+from ingest.textutils import bn_to_ascii_digits, detect_lang
 
 from .confidence import confidence
 from .guardrails import GuardConfig, repair_instruction, run_checks, support_gate
@@ -19,6 +19,37 @@ SYSTEM_ID = ACTIVE_ANSWER_SYSTEM.id
 
 REFUSAL_MARK = "NOT_FOUND"
 CITE_RE = re.compile(r"\[(\d{1,2})\]")
+# What models actually write: "[১]" in a Bangla answer, "[1, 3]", "[1–2]", "[১,২]".
+_LOOSE_CITE = re.compile(r"\[\s*([0-9০-৯]{1,2}(?:\s*(?:,|،|;|and|ও|-|–)\s*[0-9০-৯]{1,2})*)\s*\]")
+_REFUSAL_HEAD = re.compile(r"^[\s*_#>`\-]*(?i:answer\s*:\s*)?NOT[_ ]FOUND\b[\s*_`]*:?[\s*_`]*")
+
+
+def _expand(group: str) -> str:
+    nums = [int(bn_to_ascii_digits(n)) for n in re.findall(r"[0-9০-৯]{1,2}", group)]
+    if len(nums) == 2 and re.search(r"[-–]", group) and nums[0] < nums[1] <= nums[0] + 9:
+        nums = list(range(nums[0], nums[1] + 1))
+    return "".join(f"[{n}]" for n in nums)
+
+
+def normalize_answer(text: str) -> str:
+    """Canonical form of a model reply before any check runs on it.
+
+    Citations become one ASCII number per bracket ("[১, ৩]" -> "[1][3]"), so the
+    citation checks and the UI treat a Bangla answer exactly like an English
+    one. A refusal wrapped in markdown ("**NOT_FOUND:** ...") becomes a plain
+    "NOT_FOUND: ..." so it is recognised as a refusal instead of being graded
+    as an uncited answer.
+    """
+    text = (text or "").strip()
+    text = _LOOSE_CITE.sub(lambda m: _expand(m.group(1)), text)
+    m = _REFUSAL_HEAD.match(text)
+    if m:
+        text = f"{REFUSAL_MARK}: " + text[m.end():].strip()
+    return text
+
+
+def is_refusal(text: str) -> bool:
+    return normalize_answer(text).startswith(REFUSAL_MARK)
 
 
 @dataclass
@@ -158,15 +189,15 @@ def answer_question_stream(question: str, retriever, stream_llm, k: int = 5,
     for piece in stream_llm(SYSTEM, prompt):
         pieces.append(piece)
         yield {"type": "token", "text": piece}
-    text = "".join(pieces).strip()
+    text = normalize_answer("".join(pieces))
 
     refused = text.startswith(REFUSAL_MARK)
     checks = {} if refused else run_checks(question, text, ordered, guard)
     repaired = False
     if not refused and checks["failures"] and guard.repair and repair_llm:
         yield {"type": "status", "stage": "repairing", "failures": checks["failures"]}
-        retry = repair_llm(SYSTEM, f"{prompt}\n\n--- your previous answer ---\n{text}\n\n"
-                                   f"{repair_instruction(checks)}").strip()
+        retry = normalize_answer(repair_llm(SYSTEM, f"{prompt}\n\n--- your previous answer ---\n{text}\n\n"
+                                                    f"{repair_instruction(checks)}"))
         repaired = True
         retry_refused = retry.startswith(REFUSAL_MARK)
         retry_checks = {} if retry_refused else run_checks(question, retry, ordered, guard)

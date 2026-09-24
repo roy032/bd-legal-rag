@@ -8,16 +8,69 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+import numpy as np  # noqa: E402
+
 from rag import jsonio  # noqa: E402
 from rag.embed import get_embedder  # noqa: E402
 from rag.lexical import BM25Index  # noqa: E402
 from rag.store import NumpyStore, QdrantStore  # noqa: E402
+
+
+def _key(text: str) -> str:
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()
+
+
+def embed_with_reuse(chunks: list[dict], embedder, out: Path, checkpoint_every: int = 2000) -> np.ndarray:
+    """Embed only what has not been embedded before.
+
+    Vectors are reused, by hash of the embedded text, from (a) the index already
+    in `out` if it was built with the same embedder, and (b) a checkpoint left
+    by an interrupted run. So re-running after `ingest.py --update`, or after a
+    crash three hours into a CPU run, only pays for the new chunks.
+    """
+    known: dict[str, np.ndarray] = {}
+    info = out / "index.json"
+    if info.exists() and json.loads(info.read_text(encoding="utf-8")).get("embedder") == embedder.name:
+        try:
+            old = NumpyStore.load(out)
+            known.update({_key(r["text"]): v for r, v in zip(old.records, old.vectors, strict=True)})
+        except Exception as e:                      # a broken old index is just not reused
+            print(f"  (previous index not reusable: {e})")
+    ckpt_v, ckpt_k = out / "embed_checkpoint.npy", out / "embed_checkpoint.json"
+    if ckpt_v.exists() and ckpt_k.exists():
+        meta = json.loads(ckpt_k.read_text(encoding="utf-8"))
+        if meta.get("embedder") == embedder.name:
+            known.update(zip(meta["keys"], np.load(ckpt_v).astype(np.float32), strict=True))
+
+    keys = [_key(c["text"]) for c in chunks]
+    todo = sorted({k: i for i, k in enumerate(keys) if k not in known}.values())
+    print(f"  reusing {len(chunks) - len(todo)} vectors, embedding {len(todo)} new chunk(s)")
+    out.mkdir(parents=True, exist_ok=True)
+    fresh_keys: list[str] = []
+    fresh_vecs: list[np.ndarray] = []
+    for start in range(0, len(todo), max(checkpoint_every, 1)):
+        batch = todo[start:start + checkpoint_every]
+        vecs = embedder.encode_passages([chunks[i]["text"] for i in batch])
+        for i, v in zip(batch, vecs, strict=True):
+            known[keys[i]] = v
+            fresh_keys.append(keys[i])
+            fresh_vecs.append(v)
+        np.save(ckpt_v, np.asarray(fresh_vecs, dtype=np.float16))
+        ckpt_k.write_text(json.dumps({"embedder": embedder.name, "keys": fresh_keys}), encoding="utf-8")
+        print(f"  {min(start + checkpoint_every, len(todo))}/{len(todo)} embedded", flush=True)
+    vectors = np.asarray([known[k] for k in keys], dtype=np.float32)
+    for p in (ckpt_v, ckpt_k):
+        if p.exists():
+            p.unlink()
+    return vectors
 
 
 def load_chunks(path: Path) -> list[dict]:
@@ -36,6 +89,8 @@ def main() -> None:
     ap.add_argument("--bm25", action="store_true", help="also build a BM25 index (needed for hybrid)")
     ap.add_argument("--bm25-stem", action="store_true", help="strip common Bangla suffixes")
     ap.add_argument("--bm25-only", action="store_true", help="skip embeddings entirely")
+    ap.add_argument("--checkpoint-every", type=int, default=2000,
+                    help="save embedding progress every N new chunks (a crash resumes from there)")
     ap.add_argument("--quantize", action="store_true",
                     help="store int8 vectors (4x smaller, rescored exactly — measure the recall cost)")
     args = ap.parse_args()
@@ -60,9 +115,9 @@ def main() -> None:
     print(f"embedder: {embedder.name} (dim {embedder.dim})")
 
     t0 = time.perf_counter()
-    vectors = embedder.encode_passages([c["text"] for c in chunks])
+    vectors = embed_with_reuse(chunks, embedder, Path(args.out), args.checkpoint_every)
     took = time.perf_counter() - t0
-    print(f"embedded in {took:.1f}s ({len(chunks) / max(took, 1e-9):.1f} chunks/s)")
+    print(f"embedded in {took:.1f}s")
 
     store = (NumpyStore(embedder.dim, embedder.name, quantize=args.quantize)
              if args.backend == "numpy"
