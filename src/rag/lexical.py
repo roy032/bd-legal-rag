@@ -19,7 +19,6 @@ Tokenisation is the part that actually decides your Bangla numbers:
 """
 from __future__ import annotations
 
-import json
 import math
 import re
 from collections import Counter, defaultdict
@@ -29,6 +28,7 @@ from typing import Any
 
 from ingest.textutils import bn_to_ascii_digits, nfc, normalize
 
+from . import jsonio
 from .filters import matches
 from .store import Hit
 
@@ -117,26 +117,49 @@ class BM25Index:
         ]
 
     # ---------------- persistence ----------------
-    def save(self, path: str | Path) -> None:
+    def save(self, path: str | Path, write_records: bool = True, compress: bool = True) -> None:
+        """write_records=False when the dense index in the same folder already
+        holds the identical chunk records (records.jsonl) — no need for two copies."""
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
-        (path / "bm25.json").write_text(json.dumps({
+        jsonio.write_json(path / "bm25.json", {
             "k1": self.k1, "b": self.b, "stem": self.stem, "field": self.field,
             "doc_len": self.doc_len, "avgdl": self.avgdl,
             "postings": dict(self.postings),
-        }, ensure_ascii=False), encoding="utf-8")
-        with open(path / "bm25_records.jsonl", "w", encoding="utf-8") as f:
-            for r in self.records:
-                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        }, compress=compress)
+        stale = path / "bm25_records.jsonl"
+        if write_records:
+            jsonio.write_jsonl(stale, self.records, compress=compress)
+        else:
+            for p in (stale, stale.with_name(stale.name + ".gz")):
+                if p.exists():
+                    p.unlink()
 
     @classmethod
-    def load(cls, path: str | Path) -> BM25Index:
+    def load(cls, path: str | Path, records: list[dict] | None = None) -> BM25Index:
+        """`records`: reuse a list already in memory (the dense store's) instead
+        of reading a second copy of every chunk."""
         path = Path(path)
-        d = json.loads((path / "bm25.json").read_text(encoding="utf-8"))
+        d = jsonio.read_json(path / "bm25.json")
         idx = cls(k1=d["k1"], b=d["b"], stem=d["stem"], field=d["field"])
         idx.doc_len = d["doc_len"]
         idx.avgdl = d["avgdl"]
         idx.postings = defaultdict(list, {t: [tuple(x) for x in p] for t, p in d["postings"].items()})
-        with open(path / "bm25_records.jsonl", encoding="utf-8") as f:
-            idx.records = [json.loads(line) for line in f]
+        if records is not None:
+            idx.records = records
+        for name in ("bm25_records.jsonl", "records.jsonl"):
+            if records is not None:
+                break
+            if jsonio.exists(path / name):
+                idx.records = jsonio.read_jsonl(path / name)
+                break
+        else:
+            if records is None:
+                raise FileNotFoundError(f"no chunk records next to the BM25 index in {path}")
+        if len(idx.records) != len(idx.doc_len):
+            raise ValueError(f"{path}: BM25 has {len(idx.doc_len)} docs but {len(idx.records)} records")
         return idx
+
+    @staticmethod
+    def exists(path: str | Path) -> bool:
+        return jsonio.exists(Path(path) / "bm25.json")

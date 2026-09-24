@@ -19,6 +19,7 @@ from typing import Any
 
 import numpy as np
 
+from . import jsonio
 from .embed import l2_normalize
 from .filters import matches
 
@@ -118,16 +119,16 @@ class NumpyStore:
         ]
 
     # ---------------- persistence ----------------
-    def save(self, path: str | Path) -> None:
+    def save(self, path: str | Path, compress: bool = True) -> None:
+        """vectors as float16 (half the disk, cosine error ~1e-3 — far below
+        the gap between neighbouring ranks), records as gzipped JSONL."""
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
-        np.save(path / "vectors.npy", self.vectors)
-        with open(path / "records.jsonl", "w", encoding="utf-8") as f:
-            for r in self.records:
-                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        np.save(path / "vectors.npy", self.vectors.astype(np.float16))
+        jsonio.write_jsonl(path / "records.jsonl", self.records, compress=compress)
         (path / "index.json").write_text(
             json.dumps({"dim": self.dim, "embedder": self.embedder_name, "count": len(self),
-                        "quantized": self.quantize},
+                        "quantized": self.quantize, "vector_dtype": "float16"},
                        ensure_ascii=False, indent=2), encoding="utf-8")
 
     @classmethod
@@ -136,11 +137,12 @@ class NumpyStore:
         info = json.loads((path / "index.json").read_text(encoding="utf-8"))
         store = cls(dim=info["dim"], embedder_name=info.get("embedder", ""),
                     quantize=bool(info.get("quantized")))
-        store.vectors = np.load(path / "vectors.npy")
+        store.vectors = l2_normalize(np.load(path / "vectors.npy").astype(np.float32))
         if store.quantize:
             store.codes = np.round(store.vectors * 127).astype(np.int8)
-        with open(path / "records.jsonl", encoding="utf-8") as f:
-            store.records = [json.loads(line) for line in f]
+        store.records = jsonio.read_jsonl(path / "records.jsonl")
+        if len(store.records) != len(store.vectors):
+            raise ValueError(f"{path}: {len(store.vectors)} vectors but {len(store.records)} records")
         return store
 
 

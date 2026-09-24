@@ -5,6 +5,7 @@ re-run parsing and chunking as often as you like without hitting the server.
 """
 from __future__ import annotations
 
+import gzip
 import hashlib
 import logging
 import os
@@ -26,6 +27,7 @@ class Fetcher:
         retries: int = 3,
         timeout: float = 30.0,
         offline: bool = False,
+        compress: bool = True,
     ) -> None:
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -33,6 +35,9 @@ class Fetcher:
         self.retries = retries
         self.timeout = timeout
         self.offline = offline          # cache only: re-parse without touching the site
+        # Pages are ~90% navigation boilerplate and gzip about 5x. Plain .html
+        # files from older runs are still read.
+        self.compress = compress
         self._last = 0.0
         self.session = requests.Session()
         self.session.headers.update(
@@ -56,8 +61,13 @@ class Fetcher:
         if url.startswith("/"):
             url = BASE_URL + url
         path = self._cache_path(url)
-        if path.exists() and not refresh:
-            return path.read_text(encoding="utf-8")
+        gz = path.with_name(path.name + ".gz")
+        if not refresh:
+            if gz.exists():
+                with gzip.open(gz, "rt", encoding="utf-8") as f:
+                    return f.read()
+            if path.exists():
+                return path.read_text(encoding="utf-8")
         if self.offline:
             raise FileNotFoundError(f"not in cache (offline mode): {url}")
 
@@ -74,9 +84,29 @@ class Fetcher:
                 if not resp.encoding or resp.encoding.lower() in ("iso-8859-1", "ascii"):
                     resp.encoding = "utf-8"
                 html = resp.text
-                path.write_text(html, encoding="utf-8")
+                if self.compress:
+                    with gzip.open(gz, "wt", encoding="utf-8") as f:
+                        f.write(html)
+                else:
+                    path.write_text(html, encoding="utf-8")
                 return html
             except requests.RequestException as e:
                 log.warning("GET %s failed (attempt %d/%d): %s", url, attempt, self.retries, e)
                 time.sleep(self.delay * 2**attempt)  # exponential backoff
         raise RuntimeError(f"Could not fetch {url}")
+
+
+def compact_cache(cache_dir: str | Path = "data/raw") -> tuple[int, int, int]:
+    """Gzip every plain .html page in the cache in place. Returns
+    (files converted, bytes before, bytes after)."""
+    n = before = after = 0
+    for page in Path(cache_dir).glob("*.html"):
+        gz = page.with_name(page.name + ".gz")
+        data = page.read_bytes()
+        with gzip.open(gz, "wb") as f:
+            f.write(data)
+        before += len(data)
+        after += gz.stat().st_size
+        page.unlink()
+        n += 1
+    return n, before, after

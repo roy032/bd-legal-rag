@@ -188,17 +188,14 @@ class SearchPipeline:
 
 def load_records(index_dir: str | Path, chunks_path: str | Path | None = None) -> list[dict]:
     """The chunk records behind an index — needed for exact lookup and parents."""
-    import json
+    from . import jsonio
 
     index_dir = Path(index_dir)
     for name in ("records.jsonl", "bm25_records.jsonl"):
-        path = index_dir / name
-        if path.exists():
-            with open(path, encoding="utf-8") as f:
-                return [json.loads(line) for line in f if line.strip()]
+        if jsonio.exists(index_dir / name):
+            return jsonio.read_jsonl(index_dir / name)
     if chunks_path and Path(chunks_path).exists():
-        with open(chunks_path, encoding="utf-8") as f:
-            return [json.loads(line) for line in f if line.strip()]
+        return jsonio.read_jsonl(chunks_path)
     raise SystemExit(f"no chunk records found in {index_dir}")
 
 
@@ -265,10 +262,11 @@ def build_pipeline(config, index_dir: str | Path, embedder, llm=None,
         dense = Retriever(embedder, store)
     bm25 = None
     if cfg.mode in ("bm25", "hybrid"):
-        if not (index_dir / "bm25.json").exists():
+        if not BM25Index.exists(index_dir):
             raise SystemExit(f"no BM25 index in {index_dir} — rebuild with: "
                              f"python scripts/build_index.py --bm25")
-        bm25 = BM25Index.load(index_dir)
+        shared = dense.store.records if dense is not None else None
+        bm25 = BM25Index.load(index_dir, records=shared)
     parents = None
     if cfg.parent_context:
         parents = ParentIndex(records if records is not None else load_records(index_dir))

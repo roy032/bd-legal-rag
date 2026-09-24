@@ -9,6 +9,9 @@ Examples
   # delay; safe to stop and re-run — pages already in data/raw are not refetched.
   python scripts/ingest.py --delay 0.5
 
+  # Shrink an existing page cache ~5x (pages are mostly navigation boilerplate)
+  python scripts/ingest.py --compact-cache
+
   # Re-parse everything already downloaded, without touching the site
   python scripts/ingest.py --offline
 
@@ -31,11 +34,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ingest.chunk import act_overview_chunk, chunk_section  # noqa: E402
-from ingest.fetch import BASE_URL, Fetcher  # noqa: E402
+from ingest.fetch import BASE_URL, Fetcher, compact_cache  # noqa: E402
 from ingest.parse import parse_act, parse_index, parse_section  # noqa: E402
 from ingest.textutils import extract_year  # noqa: E402
 
 INDEX_URL = f"{BASE_URL}/laws-of-bangladesh-chronological-index.html"
+# The index marks repealed acts in the title itself: "... Act, 1980 [Repealed]", "... [রহিত]".
+REPEALED_IN_INDEX = re.compile(r"\[\s*(?:রহিত|Repealed)\s*\]", re.I)
 log = logging.getLogger("ingest")
 
 
@@ -53,6 +58,8 @@ def select_acts(fetcher: Fetcher, args) -> list[tuple[int, str | None]]:
             continue
         if args.year_to and (y is None or y > args.year_to):
             continue
+        if not args.include_repealed and REPEALED_IN_INDEX.search(r.title):
+            continue
         sel.append(r)
     if args.limit:
         sel = sel[: args.limit]
@@ -68,6 +75,12 @@ def main() -> None:
     ap.add_argument("--limit", type=int, help="max number of acts")
     ap.add_argument("--max-chars", type=int, default=1800, help="max chars per chunk body")
     ap.add_argument("--delay", type=float, default=1.0, help="seconds between requests (be polite)")
+    ap.add_argument("--include-repealed", action="store_true",
+                    help="also fetch acts the index marks [Repealed]/[রহিত] (skipped by default)")
+    ap.add_argument("--no-compress", action="store_true",
+                    help="store downloaded pages as plain .html instead of .html.gz")
+    ap.add_argument("--compact-cache", action="store_true",
+                    help="gzip every plain .html page already in the cache, then exit")
     ap.add_argument("--offline", action="store_true",
                     help="use only pages already in the cache; skip anything not downloaded")
     ap.add_argument("--out", default="data/processed")
@@ -78,7 +91,12 @@ def main() -> None:
 
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
-    fetcher = Fetcher(cache_dir=args.cache, delay=args.delay, offline=args.offline)
+    if args.compact_cache:
+        n, before, after = compact_cache(args.cache)
+        print(f"compressed {n} pages: {before / 1e6:.1f} MB -> {after / 1e6:.1f} MB")
+        return
+    fetcher = Fetcher(cache_dir=args.cache, delay=args.delay, offline=args.offline,
+                      compress=not args.no_compress)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 

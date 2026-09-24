@@ -8,21 +8,20 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from rag import jsonio  # noqa: E402
 from rag.embed import get_embedder  # noqa: E402
 from rag.lexical import BM25Index  # noqa: E402
 from rag.store import NumpyStore, QdrantStore  # noqa: E402
 
 
 def load_chunks(path: Path) -> list[dict]:
-    with open(path, encoding="utf-8") as f:
-        return [json.loads(line) for line in f if line.strip()]
+    return jsonio.read_jsonl(path)
 
 
 def main() -> None:
@@ -48,7 +47,8 @@ def main() -> None:
         t0 = time.perf_counter()
         bm25 = BM25Index(stem=args.bm25_stem)
         bm25.add(chunks)
-        bm25.save(args.out)
+        # The dense index writes the same records; keep one copy on disk.
+        bm25.save(args.out, write_records=args.bm25_only or args.backend != "numpy")
         print(f"BM25: {len(bm25)} docs, {len(bm25.postings)} terms, "
               f"avg length {bm25.avgdl:.0f} tokens, stem={args.bm25_stem} "
               f"({time.perf_counter() - t0:.1f}s) -> {args.out}")
