@@ -38,6 +38,8 @@ class TestSectionRegex(unittest.TestCase):
         self.assertEqual(SECTION_REF.findall("section 304A applies"), ["304A"])
         self.assertEqual(SECTION_REF.findall("ধারা ৫ক অনুযায়ী"), ["৫ক"])
         self.assertEqual(SECTION_REF.findall("ধারা ৩০২এ"), ["৩০২"])
+        self.assertEqual(SECTION_REF.findall("Article 27 of the Constitution"), ["27"])
+        self.assertEqual(SECTION_REF.findall("সংবিধানের অনুচ্ছেদ ৩৯"), ["৩৯"])
 
     def test_expansion_has_no_junk_tokens(self):
         self.assertEqual(expand_section_refs("ধারা ৩০২ কী বলে?"),

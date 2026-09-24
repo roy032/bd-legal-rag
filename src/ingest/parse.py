@@ -29,7 +29,14 @@ from bs4 import BeautifulSoup, NavigableString, Tag
 
 from .fetch import BASE_URL
 from .models import Act, ActRef, Section, SectionRef
-from .textutils import bn_to_ascii_digits, detect_lang, extract_year, fix_legacy_bangla, nfc, normalize
+from .textutils import (
+    bn_to_ascii_digits,
+    detect_lang,
+    extract_year,
+    fix_legacy_bangla,
+    nfc,
+    normalize,
+)
 
 ACT_HREF = re.compile(r"/act-(\d+)\.html(?:\?.*)?$")
 SECTION_HREF = re.compile(r"/act-(\d+)/section-(\d+)\.html(?:\?.*)?$")

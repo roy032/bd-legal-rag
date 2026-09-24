@@ -28,11 +28,21 @@ class LimiterBackend(Protocol):
     def check(self, client: str) -> Decision: ...
 
 
+def _connect(redis, url: str):
+    """Connect and PING. `Redis.from_url` is lazy — it succeeds for a host that
+    does not exist — so without the ping an unreachable Redis would be "chosen"
+    and then silently drop every cache write for the life of the process."""
+    client = redis.Redis.from_url(url, decode_responses=True,
+                                  socket_connect_timeout=1, socket_timeout=1)
+    client.ping()
+    return client
+
+
 class RedisCache:
     def __init__(self, url: str, ttl_s: float = 1800, prefix: str = "bdrag:answer:") -> None:
         import redis  # pip install redis
 
-        self.client = redis.Redis.from_url(url, decode_responses=True)
+        self.client = _connect(redis, url)
         self.ttl_s, self.prefix = int(ttl_s), prefix
         self.hits = self.misses = 0
 
@@ -64,7 +74,7 @@ class RedisLimiter:
                  prefix: str = "bdrag:rl:") -> None:
         import redis
 
-        self.client = redis.Redis.from_url(url, decode_responses=True)
+        self.client = _connect(redis, url)
         self.limit = max(int(rate_per_min), 1)
         self.burst = burst
         self.prefix = prefix
