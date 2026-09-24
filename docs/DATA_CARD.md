@@ -36,10 +36,15 @@ URL, character length.
 ## Known gaps and biases
 - **Schedules (তফসিল), forms and appendices are not parsed.** Fee tables and
   prescribed forms are therefore missing, and people ask about exactly those.
-- **Amendment footnotes are detected heuristically** and are not tied to the
-  clause they modify. A chunk marked `[amended]` may not be the text in force.
+- **The text is the site's consolidated version.** Amendments are already
+  applied by the site; amendment footnotes are kept per section (matched by
+  their markers) but not tied to the exact clause they changed. See ADR 0008.
 - **Point-in-time law is not modelled**: there is one version, "as published now".
-- **Repealed acts are included but flagged**, and excluded from retrieval by default.
+- **Repealed acts are skipped at ingest by default** (`--include-repealed` keeps
+  them, flagged with the site's repeal note and down-weighted in retrieval).
+- **Legacy font-conversion errors.** Many Bangla pages were converted from the
+  SutonnyMJ font and contain broken conjuncts (e.g. ক্ষ written as "ত্মগ").
+  `fix_legacy_bangla` repairs the patterns found in the corpus; rarer ones remain.
 - **Older acts are in English, newer ones in Bangla**, so a language filter is
   also, accidentally, a date filter. Report per-language results with that in mind.
 - **No case law, rules (বিধিমালা), SROs or gazette notifications.** Many practical

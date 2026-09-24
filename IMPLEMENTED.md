@@ -136,7 +136,7 @@ Suite: **202 tests**, ruff clean, every `src/` module exercised.
 | `pyproject.toml`, installable, `bdrag` entry point | **Done** |
 | ruff clean, mypy configured | **Done** (mypy advisory in CI) |
 | Coverage in CI with a floor | **Done** — every `src/` module is exercised |
-| ADRs | **Done** — six, in `docs/adr/` |
+| ADRs | **Done** — ten, in `docs/adr/` (reference resolution, in-force text, storage, live verification added) |
 | Data card | **Done** |
 | Blog draft | **Done** — `docs/BLOG_DRAFT.md`, with blanks where your numbers go |
 | Property-based tests | **Not done** — Hypothesis is not installable in this environment |
