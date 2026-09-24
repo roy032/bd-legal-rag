@@ -1,0 +1,18 @@
+# Phase 1 — ingestion
+requests>=2.31
+beautifulsoup4>=4.12
+lxml>=5.0
+
+# Phase 2 — retrieval
+numpy>=1.24
+sentence-transformers>=3.0     # embeddings (BAAI/bge-m3). Pulls in torch; ~2 GB.
+
+# Phase 7 — service
+starlette>=0.37
+uvicorn[standard]>=0.30
+
+# Optional integrations
+# qdrant-client>=1.9           # --backend qdrant
+anthropic>=0.39                # RAG_LLM=anthropic
+openai>=1.40                   # RAG_LLM=openai
+# Ollama runs as a separate local service; its HTTP client is requests above.

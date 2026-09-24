@@ -1,0 +1,17 @@
+{
+  "acts": 1,
+  "sections": 3,
+  "sections_amended": 1,
+  "chunks": 7,
+  "chunks_continuation": 3,
+  "languages": {
+    "bn": 1
+  },
+  "chunk_chars": {
+    "min": 75,
+    "median": 431,
+    "p95": 863,
+    "max": 863
+  },
+  "seconds": 0.0
+}

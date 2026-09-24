@@ -1,0 +1,13 @@
+data/*
+!data/sample/
+!data/eval/
+data/eval/todo.jsonl
+results/*.json
+__pycache__/
+*.pyc
+.venv/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.coverage
+.env

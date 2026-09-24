@@ -1,0 +1,6 @@
+{
+  "dim": 512,
+  "embedder": "hashing-512",
+  "count": 7,
+  "quantized": false
+}

@@ -1,0 +1,547 @@
+"""HTTP service around the pipeline.
+
+Built on Starlette (the ASGI toolkit FastAPI is built on) so the service has one
+small dependency and nothing generated between you and the request. Porting to
+FastAPI is mechanical: the payloads below map one-to-one onto pydantic models.
+
+Endpoints
+  GET  /                health-checked UI
+  GET  /health          liveness + what is loaded
+  GET  /stats           config, cache, cost projection
+  GET  /metrics         Prometheus text
+  POST /search          retrieval only — no model call, free and fast
+  POST /ask             grounded answer with citations and guardrail report
+  POST /ask/stream      the same, streamed as server-sent events
+  POST /feedback        thumbs up/down + comment, appended to a JSONL file
+  GET  /a/{id}          permalink to a previously produced answer
+
+Three things here that are easy to get wrong and expensive to get wrong:
+
+1. **Blocking work runs in a thread**, never on the event loop. Embedding,
+   reranking and HTTP calls to a model provider are synchronous; awaiting them
+   directly would serialise every concurrent request.
+2. **The cache key includes the index fingerprint**, so rebuilding the index
+   invalidates every cached answer instead of serving yesterday's pipeline.
+3. **The model failing degrades to retrieval results**, with a notice, rather
+   than a blank error page.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import os
+import time
+import uuid
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+
+from starlette.applications import Starlette
+from starlette.concurrency import run_in_threadpool
+from starlette.middleware import Middleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.cors import CORSMiddleware
+from starlette.requests import Request
+from starlette.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
+from starlette.routing import Mount, Route
+from starlette.staticfiles import StaticFiles
+
+from rag.agent import AgentConfig, LegalAgent
+from rag.answer import answer_question, answer_question_stream
+from rag.guardrails import GuardConfig
+from rag.llm import LLMError
+from rag.pipeline import RetrievalConfig, index_fingerprint
+from service.backends import make_cache, make_limiter
+from service.cache import cache_key
+from service.cost import estimate_cost, project_monthly
+from service.metrics import Metrics
+from service.tracing import Trace
+
+STATIC = Path(__file__).parent / "static"
+log = logging.getLogger("service")
+
+SECURITY_HEADERS = {
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY",
+    "referrer-policy": "no-referrer",
+    "content-security-policy":
+        "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; "
+        "connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'self'",
+}
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    return os.environ.get(name, str(default)).lower() in ("1", "true", "yes", "on")
+
+
+@dataclass
+class ServiceConfig:
+    index: str = "data/index"
+    chunks: str = "data/processed/chunks.jsonl"
+    embedder: str = "st"
+    model: str = "BAAI/bge-m3"
+    retrieval: RetrievalConfig = field(default_factory=lambda: RetrievalConfig(
+        mode="hybrid", expand_refs=True, synonyms=True, transliterate=True, route=True,
+        max_parts_per_section=2))
+    k: int = 5
+    max_k: int = 20
+    min_score: float | None = None
+    agent_enabled: bool = True
+    agent_auto: bool = True              # route multi-hop questions to the agent
+    max_steps: int = 5
+    provider: str | None = None
+    llm_model: str = ""
+    cache_ttl_s: float = 1800
+    cache_size: int = 512
+    rate_per_min: float = 20
+    burst: int = 5
+    api_keys: dict[str, float] = field(default_factory=dict)   # key -> requests/min
+    require_api_key: bool = False
+    entailer: str = "none"           # none | lexical | nli
+    feedback_path: str = "data/feedback.jsonl"
+    analytics_path: str = "data/queries.jsonl"
+    cors_origins: list[str] = field(default_factory=lambda: ["*"])
+
+    @classmethod
+    def from_env(cls) -> ServiceConfig:
+        e = os.environ.get
+        mmr = e("BDRAG_MMR")
+        retrieval = RetrievalConfig(
+            mode=e("BDRAG_MODE", "hybrid"),
+            rerank=e("BDRAG_RERANK", "none"),
+            expand_refs=_env_bool("BDRAG_EXPAND_REFS", True),
+            synonyms=_env_bool("BDRAG_SYNONYMS", True),
+            transliterate=_env_bool("BDRAG_TRANSLITERATE", True),
+            route=_env_bool("BDRAG_ROUTE", True),
+            boost_in_force=_env_bool("BDRAG_BOOST_IN_FORCE", True),
+            parent_context=_env_bool("BDRAG_PARENT_CONTEXT", False),
+            mmr_lambda=float(mmr) if mmr else None,
+            max_parts_per_section=int(e("BDRAG_MAX_PARTS", "2")),
+        )
+        keys: dict[str, float] = {}
+        min_score = e("BDRAG_MIN_SCORE")
+        if raw := e("BDRAG_API_KEYS"):       # "key1:60,key2:20"
+            for entry in raw.split(","):
+                key, _, rate = entry.partition(":")
+                keys[key.strip()] = float(rate or "20")
+        return cls(
+            index=e("BDRAG_INDEX", "data/index"),
+            chunks=e("BDRAG_CHUNKS", "data/processed/chunks.jsonl"),
+            embedder=e("BDRAG_EMBEDDER", "st"),
+            model=e("BDRAG_MODEL", "BAAI/bge-m3"),
+            retrieval=retrieval,
+            k=int(e("BDRAG_K", "5")),
+            min_score=float(min_score) if min_score is not None else None,
+            agent_enabled=_env_bool("BDRAG_AGENT", True),
+            agent_auto=_env_bool("BDRAG_AGENT_AUTO", True),
+            max_steps=int(e("BDRAG_MAX_STEPS", "5")),
+            provider=e("RAG_LLM"),
+            llm_model=e("RAG_MODEL", ""),
+            cache_ttl_s=float(e("BDRAG_CACHE_TTL", "1800")),
+            rate_per_min=float(e("BDRAG_RATE_PER_MIN", "20")),
+            api_keys=keys,
+            require_api_key=_env_bool("BDRAG_REQUIRE_API_KEY", False),
+            entailer=e("BDRAG_ENTAILER", "none"),
+            feedback_path=e("BDRAG_FEEDBACK", "data/feedback.jsonl"),
+            analytics_path=e("BDRAG_ANALYTICS", "data/queries.jsonl"),
+            cors_origins=[o for o in e("BDRAG_CORS", "*").split(",") if o],
+        )
+
+
+class RequestContext(BaseHTTPMiddleware):
+    """Request id, timing, metrics, security headers, structured logs, JSON 500."""
+
+    def __init__(self, app, metrics: Metrics) -> None:
+        super().__init__(app)
+        self.metrics = metrics
+
+    async def dispatch(self, request: Request, call_next):
+        rid = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
+        request.state.request_id = rid
+        request.state.trace = Trace(rid)
+        start = time.perf_counter()
+        try:
+            response = await call_next(request)
+        except Exception:
+            log.exception(json.dumps({"request_id": rid, "path": request.url.path,
+                                      "event": "unhandled_error"}))
+            self.metrics.inc("errors_total", path=request.url.path)
+            return JSONResponse({"error": "internal error", "request_id": rid}, status_code=500,
+                                headers=SECURITY_HEADERS)
+        took = time.perf_counter() - start
+        self.metrics.inc("requests_total", path=request.url.path, status=response.status_code)
+        self.metrics.observe("request", took, path=request.url.path)
+        response.headers.update({"x-request-id": rid, **SECURITY_HEADERS})
+        log.info(json.dumps({"request_id": rid, "path": request.url.path,
+                             "status": response.status_code, "ms": round(took * 1000)}))
+        return response
+
+
+def _client(request: Request) -> str:
+    fwd = request.headers.get("x-forwarded-for")
+    return (fwd.split(",")[0].strip() if fwd
+            else (request.client.host if request.client else "unknown"))
+
+
+def _append_jsonl(path: str, row: dict) -> None:
+    try:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except Exception:                        # logging must never break a response
+        log.warning("could not append to %s", path)
+
+
+MULTI_HOP_HINTS = ("difference", "compare", "পার্থক্য", "তুলনা", "and also", "এবং কি",
+                   "both", "দুটি", "besides")
+
+
+def wants_agent(question: str) -> bool:
+    """Cheap router: only pay for multi-step retrieval when the question needs it."""
+    low = question.lower()
+    return any(h in low for h in MULTI_HOP_HINTS) or low.count("?") > 1
+
+
+def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
+               stream_llm=None, records=None) -> Starlette:
+    """Build the app. Components can be injected, which is what the tests do —
+    a service you cannot construct without a GPU and an API key is untestable."""
+    cfg = config or ServiceConfig.from_env()
+    metrics = Metrics()
+    answers = make_cache(cfg.cache_ttl_s, cfg.cache_size)
+    limiter = make_limiter(cfg.rate_per_min, cfg.burst)
+    recent: dict[str, dict] = {}             # permalinks: id -> answer payload
+    state: dict = {"pipeline": pipeline, "llm": llm, "stream_llm": stream_llm,
+                   "records": records, "agent": None, "ready": pipeline is not None,
+                   "fingerprint": index_fingerprint(cfg.index)}
+
+    def build() -> None:
+        """Load the index and models once, lazily, so startup failures are visible."""
+        if state["ready"]:
+            return
+        from rag.embed import get_embedder
+        from rag.llm import get_llm, get_stream_llm
+        from rag.pipeline import build_pipeline, load_records
+
+        embedder = get_embedder(cfg.embedder, model=cfg.model)
+        state["records"] = state["records"] or load_records(cfg.index, cfg.chunks)
+        state["llm"] = state["llm"] or get_llm(cfg.provider)
+        state["stream_llm"] = state["stream_llm"] or get_stream_llm(cfg.provider)
+        state["pipeline"] = build_pipeline(cfg.retrieval, cfg.index, embedder,
+                                           llm=state["llm"], records=state["records"])
+        state["fingerprint"] = index_fingerprint(cfg.index)
+        state["ready"] = True
+
+    def guard() -> GuardConfig:
+        if "entailer" not in state:
+            from rag.entail import get_entailer
+            try:
+                state["entailer"] = get_entailer(cfg.entailer)
+            except Exception:                # a missing NLI model must not stop the service
+                log.warning("entailer '%s' unavailable; running without claim checking",
+                            cfg.entailer)
+                state["entailer"] = None
+        return GuardConfig(min_score=cfg.min_score, entailer=state["entailer"])
+
+    def agent() -> LegalAgent:
+        if state["agent"] is None:
+            state["agent"] = LegalAgent(state["pipeline"], state["records"] or [], state["llm"],
+                                        AgentConfig(max_steps=cfg.max_steps, per_call_k=cfg.k,
+                                                    guard=guard()))
+        return state["agent"]
+
+    async def payload(request: Request) -> dict:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        return body if isinstance(body, dict) else {}
+
+    def clamp_k(value) -> int:
+        try:
+            return max(1, min(int(value), cfg.max_k))
+        except (TypeError, ValueError):
+            return cfg.k
+
+    def authorize(request: Request):
+        """API key -> its own quota. Without keys the service is open but rate limited."""
+        key = request.headers.get("x-api-key") or request.query_params.get("api_key")
+        if cfg.api_keys and key in cfg.api_keys:
+            return None, f"key:{key[:6]}"
+        if cfg.require_api_key:
+            return JSONResponse({"error": "missing or unknown API key"}, status_code=401), None
+        return None, _client(request)
+
+    def limited(client: str):
+        decision = limiter.check(client)
+        if decision.allowed:
+            return None
+        metrics.inc("rate_limited_total")
+        return JSONResponse({"error": "rate limit exceeded",
+                             "retry_after_s": decision.retry_after_s}, status_code=429,
+                            headers={"retry-after": str(int(decision.retry_after_s) + 1)})
+
+    def gate(request: Request):
+        """Auth + rate limit in one step. Returns (response_or_None, client_id)."""
+        denied, client = authorize(request)
+        if denied is not None:
+            return denied, None
+        blocked = limited(client)
+        return blocked, client
+
+    async def degraded_retrieval(question: str, k: int):
+        hits = await run_in_threadpool(lambda: state["pipeline"].search(question, k=k))
+        return JSONResponse({
+            "question": question,
+            "answer": None,
+            "degraded": True,
+            "error": "the answering model is not configured; showing retrieved provisions",
+            "sources": [{"n": n, "citation": h.citation, "url": h.metadata.get("url"),
+                         "text": h.body[:800]} for n, h in enumerate(hits, 1)],
+            "disclaimer": "Informational only — not legal advice.",
+        }, status_code=503)
+
+    # ----------------------------------------------------------- endpoints
+    async def health(request: Request):
+        try:
+            await run_in_threadpool(build)
+        except Exception as e:
+            return JSONResponse({"status": "degraded", "error": str(e)}, status_code=503)
+        store = getattr(state["pipeline"].dense, "store", None) if state["pipeline"].dense else None
+        return JSONResponse({"status": "ok", "mode": state["pipeline"].config.mode,
+                             "chunks": len(store) if store else None,
+                             "embedder": getattr(store, "embedder_name", None),
+                             "index_fingerprint": state["fingerprint"],
+                             "agent_enabled": cfg.agent_enabled})
+
+    async def stats(request: Request):
+        await run_in_threadpool(build)
+        snap = metrics.snapshot()
+        spend = snap["counters"].get("llm_cost_usd_total", 0.0)
+        answered = sum(v for k, v in snap["counters"].items() if k.startswith("answers_total"))
+        per_query = spend / answered if answered else 0.0
+        return JSONResponse({
+            "config": {**{k: v for k, v in asdict(cfg).items()
+                          if k not in ("cors_origins", "api_keys", "retrieval")},
+                       "retrieval": cfg.retrieval.to_dict()},
+            "index_fingerprint": state["fingerprint"],
+            "cache": answers.stats(),
+            "cost": {"total_usd": round(spend, 4), "per_query_usd": round(per_query, 5),
+                     "projected_monthly_usd_at_200_per_day": round(project_monthly(per_query), 2)},
+            "metrics": snap,
+        })
+
+    async def metrics_endpoint(request: Request):
+        return PlainTextResponse(metrics.prometheus(), media_type="text/plain; version=0.0.4")
+
+    async def search(request: Request):
+        blocked, _ = gate(request)
+        if blocked is not None:
+            return blocked
+        body = await payload(request)
+        question = (body.get("question") or "").strip()
+        if not question:
+            return JSONResponse({"error": "question is required"}, status_code=400)
+        await run_in_threadpool(build)
+        k = clamp_k(body.get("k"))
+        trace: Trace = request.state.trace
+        with trace.span("retrieve", k=k):
+            hits = await run_in_threadpool(
+                lambda: state["pipeline"].search(question, k=k, language=body.get("language")))
+        metrics.inc("search_total")
+        trace.finish(endpoint="search", question_chars=len(question), hits=len(hits))
+        return JSONResponse({"question": question, "results": [
+            {"n": n, "citation": h.citation, "score": round(h.score, 4),
+             "section_title": h.metadata.get("section_title"),
+             "act_title": h.metadata.get("act_title"), "url": h.metadata.get("url"),
+             "amended": bool(h.metadata.get("amended")), "text": h.body[:1200]}
+            for n, h in enumerate(hits, 1)]})
+
+    def serialize(ans, cached: bool = False, answer_id: str | None = None) -> dict:
+        return {
+            "id": answer_id, "question": ans.question, "answer": ans.text,
+            "refused": ans.refused, "abstained": ans.abstained, "repaired": ans.repaired,
+            "failures": ans.failures, "sources": ans.sources,
+            "confidence": ans.checks.get("confidence"),
+            "llm_calls": ans.llm_calls, "cached": cached,
+            "latency_s": round(ans.latency_s, 3),
+            "trace": ans.checks.get("trace"), "stop_reason": ans.checks.get("stop_reason"),
+            "disclaimer": "Informational only — not legal advice.",
+        }
+
+    def record_cost(ans) -> None:
+        model = cfg.llm_model or (cfg.provider or "")
+        prompt_chars = sum(len(h.body) for h in ans.hits) + len(ans.question) + 1500
+        metrics.inc("llm_cost_usd_total",
+                    estimate_cost(model, prompt_chars * max(ans.llm_calls, 1), len(ans.text)))
+
+    async def ask(request: Request):
+        blocked, client = gate(request)
+        if blocked is not None:
+            return blocked
+        body = await payload(request)
+        question = (body.get("question") or "").strip()
+        if not question:
+            return JSONResponse({"error": "question is required"}, status_code=400)
+        if len(question) > 500:
+            return JSONResponse({"error": "question too long (max 500 characters)"}, status_code=400)
+        await run_in_threadpool(build)
+        trace: Trace = request.state.trace
+        k = clamp_k(body.get("k"))
+        if getattr(state["llm"], "offline_stub", False):
+            return await degraded_retrieval(question, k)
+        use_agent = cfg.agent_enabled and (bool(body.get("agent")) or
+                                           (cfg.agent_auto and wants_agent(question)))
+        key = cache_key(question, k=k, agent=use_agent, language=body.get("language"),
+                        fingerprint=state["fingerprint"], retrieval=cfg.retrieval.to_dict(),
+                        min_score=cfg.min_score)
+        if (hit := answers.get(key)) is not None:
+            metrics.inc("cache_hits_total")
+            return JSONResponse({**hit, "cached": True})
+
+        def work():
+            if use_agent:
+                return agent().run(question)
+            return answer_question(question, state["pipeline"], state["llm"], k=k,
+                                   guard=guard(), language=body.get("language"))
+
+        t0 = time.perf_counter()
+        try:
+            with trace.span("answer", agent=use_agent, k=k):
+                ans = await run_in_threadpool(work)
+        except LLMError as e:
+            # Graceful degradation: the model is down, retrieval is not. Give the
+            # user the provisions we found and say plainly what is missing.
+            metrics.inc("degraded_total")
+            with trace.span("degraded_retrieval"):
+                hits = await run_in_threadpool(lambda: state["pipeline"].search(question, k=k))
+            trace.finish(endpoint="ask", degraded=True)
+            return JSONResponse({
+                "question": question, "answer": None, "degraded": True,
+                "error": f"the answering model is unavailable ({type(e).__name__})",
+                "sources": [{"n": n, "citation": h.citation, "url": h.metadata.get("url"),
+                             "text": h.body[:800]} for n, h in enumerate(hits, 1)],
+                "disclaimer": "Informational only — not legal advice.",
+            }, status_code=503)
+
+        metrics.observe("answer", time.perf_counter() - t0, agent=str(use_agent))
+        metrics.inc("answers_total", agent=str(use_agent),
+                    outcome="refused" if ans.refused else "answered")
+        if ans.repaired:
+            metrics.inc("repairs_total")
+        if ans.failures:
+            metrics.inc("guardrail_failures_total")
+        record_cost(ans)
+
+        answer_id = uuid.uuid4().hex[:10]
+        out = serialize(ans, answer_id=answer_id)
+        answers.put(key, out)
+        recent[answer_id] = out
+        if len(recent) > 500:
+            recent.pop(next(iter(recent)))
+        _append_jsonl(cfg.analytics_path, {
+            "ts": time.time(), "id": answer_id, "client": client, "question": question,
+            "agent": use_agent, "refused": ans.refused, "failures": ans.failures,
+            "sources": [s["chunk_id"] for s in ans.sources], "latency_s": round(ans.latency_s, 2)})
+        trace.finish(endpoint="ask", refused=ans.refused, agent=use_agent,
+                     llm_calls=ans.llm_calls)
+        return JSONResponse(out)
+
+    async def ask_stream(request: Request):
+        blocked, _ = gate(request)
+        if blocked is not None:
+            return blocked
+        body = await payload(request)
+        question = (body.get("question") or "").strip()
+        if not question:
+            return JSONResponse({"error": "question is required"}, status_code=400)
+        await run_in_threadpool(build)
+        k = clamp_k(body.get("k"))
+        if getattr(state["stream_llm"], "offline_stub", False):
+            return await degraded_retrieval(question, k)
+
+        def sse(event: str, data: dict) -> str:
+            return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+        def events():
+            try:
+                for item in answer_question_stream(
+                        question, state["pipeline"], state["stream_llm"], k=k, guard=guard(),
+                        repair_llm=state["llm"], language=body.get("language")):
+                    kind = item["type"]
+                    if kind == "final":
+                        ans = item["answer"]
+                        metrics.inc("answers_total", agent="False",
+                                    outcome="refused" if ans.refused else "answered")
+                        record_cost(ans)
+                        answer_id = uuid.uuid4().hex[:10]
+                        out = serialize(ans, answer_id=answer_id)
+                        recent[answer_id] = out
+                        yield sse("final", out)
+                    else:
+                        yield sse(kind, {k2: v for k2, v in item.items() if k2 != "type"})
+            except Exception as e:            # a dropped stream must not hang the client
+                log.exception("stream failed")
+                yield sse("error", {"error": f"{type(e).__name__}: {e}"})
+
+        return StreamingResponse(events(), media_type="text/event-stream",
+                                 headers={"cache-control": "no-cache", "x-accel-buffering": "no"})
+
+    async def feedback(request: Request):
+        """Thumbs up/down on an answer. This is tomorrow's evaluation set."""
+        body = await payload(request)
+        answer_id = (body.get("id") or "").strip()
+        rating = body.get("rating")
+        if rating not in ("up", "down"):
+            return JSONResponse({"error": "rating must be 'up' or 'down'"}, status_code=400)
+        stored = recent.get(answer_id, {})
+        _append_jsonl(cfg.feedback_path, {
+            "ts": time.time(), "id": answer_id, "rating": rating,
+            "comment": (body.get("comment") or "")[:1000],
+            "question": stored.get("question"), "answer": stored.get("answer"),
+            "sources": [s.get("chunk_id") for s in stored.get("sources", [])],
+            "failures": stored.get("failures"),
+        })
+        metrics.inc("feedback_total", rating=rating)
+        return JSONResponse({"ok": True})
+
+    async def permalink(request: Request):
+        stored = recent.get(request.path_params["answer_id"])
+        if not stored:
+            return JSONResponse({"error": "not found or expired"}, status_code=404)
+        return JSONResponse(stored)
+
+    async def index_page(request: Request):
+        return FileResponse(STATIC / "index.html")
+
+    routes: list[Route | Mount] = [
+        Route("/", index_page),
+        Route("/health", health),
+        Route("/stats", stats),
+        Route("/metrics", metrics_endpoint),
+        Route("/search", search, methods=["POST"]),
+        Route("/ask", ask, methods=["POST"]),
+        Route("/ask/stream", ask_stream, methods=["POST"]),
+        Route("/feedback", feedback, methods=["POST"]),
+        Route("/a/{answer_id}", permalink),
+    ]
+    if STATIC.exists():
+        routes.append(Mount("/static", StaticFiles(directory=str(STATIC)), name="static"))
+
+    middleware = [
+        Middleware(RequestContext, metrics=metrics),
+        Middleware(CORSMiddleware, allow_origins=cfg.cors_origins, allow_methods=["*"],
+                   allow_headers=["*"]),
+    ]
+    app = Starlette(routes=routes, middleware=middleware)
+    app.state.config, app.state.metrics, app.state.cache = cfg, metrics, answers
+    app.state.components, app.state.recent = state, recent
+    return app
+
+
+app = None  # built on demand by `uvicorn service.app:get_app --factory`
+
+
+def get_app() -> Starlette:
+    logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"),
+                        format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    return create_app()

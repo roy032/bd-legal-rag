@@ -1,0 +1,6 @@
+{"id": "s001", "question": "এই আইনের সংক্ষিপ্ত শিরোনাম কী?", "language": "bn", "type": "single", "gold": ["1037:38212"], "reference_answer": "এই আইন বীমা আইন, ২০১০ নামে অভিহিত হইবে।", "note": "sample set for the fixture corpus — your real set replaces this"}
+{"id": "s002", "question": "আইনটি কখন কার্যকর হইবে?", "language": "bn", "type": "paraphrase", "gold": ["1037:38212"], "reference_answer": "ইহা অবিলম্বে কার্যকর হইবে।"}
+{"id": "s003", "question": "ধারা ২ এ কী আছে?", "language": "bn", "type": "exact_ref", "gold": ["1037:40548"], "reference_answer": "ধারা ২ এ আইনে ব্যবহৃত শব্দসমূহের সংজ্ঞা দেওয়া হইয়াছে।"}
+{"id": "s004", "question": "দায়যুক্ত বীমাকারীর ক্ষেত্রে আইনের প্রযোজ্যতা কী?", "language": "bn", "type": "single", "gold": ["1037:38214"], "reference_answer": "দায়যুক্ত বীমাকারীর ক্ষেত্রে এই আইনের বিধানাবলী প্রযোজ্য হইবে, তবে ধারা ৭ এর বিধান সাপেক্ষে।"}
+{"id": "s005", "question": "সংজ্ঞা ও প্রযোজ্যতা একত্রে কী বলে?", "language": "bn", "type": "multi", "gold": ["1037:40548", "1037:38214"], "reference_answer": "ধারা ২ সংজ্ঞা দেয় এবং ধারা ৩ প্রযোজ্যতা নির্ধারণ করে।"}
+{"id": "s006", "question": "What is the VAT rate in Bangladesh?", "language": "en", "type": "unanswerable", "gold": [], "reference_answer": "", "note": "not in this corpus — the system must refuse"}

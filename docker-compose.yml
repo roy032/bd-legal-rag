@@ -1,0 +1,29 @@
+services:
+  api:
+    build: .
+    ports: ["8000:8000"]
+    environment:
+      RAG_LLM: ${RAG_LLM:-ollama}
+      RAG_MODEL: ${RAG_MODEL:-qwen2.5:7b}
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      BDRAG_MODE: hybrid
+      BDRAG_RATE_PER_MIN: "20"
+    volumes:
+      - ./data:/app/data          # the index lives outside the image
+      - hf-cache:/app/.cache/huggingface
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # Optional: swap NumpyStore for Qdrant once the corpus outgrows brute force.
+  qdrant:
+    image: qdrant/qdrant:latest
+    profiles: ["qdrant"]
+    ports: ["6333:6333"]
+    volumes: ["qdrant:/qdrant/storage"]
+
+volumes:
+  hf-cache:
+  qdrant:

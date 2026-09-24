@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push: { branches: [main] }
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -e ".[serve,dev]"
+
+      - name: Lint
+        run: ruff check src scripts tests
+
+      - name: Type check
+        run: mypy || true        # advisory until the annotations are complete
+
+      - name: Unit tests with coverage
+        run: |
+          coverage run -m unittest discover -s tests -v
+          coverage report -m --fail-under=70
+
+      # The quality gate. Runs on the bundled sample corpus so CI needs no
+      # scraped data and no model download; point it at your real index and
+      # evaluation set (cached as an artefact) once you have them.
+      - name: Build sample index
+        run: |
+          python scripts/build_index.py --chunks data/sample/chunks.jsonl \
+            --out data/sample/index --embedder hashing --bm25
+
+      - name: Retrieval quality gate
+        run: |
+          python scripts/ci_eval_gate.py \
+            --eval data/eval/sample_eval.jsonl --chunks data/sample/chunks.jsonl \
+            --index data/sample/index --embedder hashing --mode hybrid --expand-refs \
+            -k 5 --baseline results/baseline.json --min 0.8
+
+      - name: Adversarial suite (injection, romanised input, typos)
+        run: |
+          python scripts/eval_e2e.py --eval data/eval/adversarial.jsonl \
+            --chunks data/sample/chunks.jsonl --index data/sample/index \
+            --embedder hashing --provider echo --no-judge --label ci-adversarial \
+            --results /tmp/results -k 3
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install pip-audit
+      - run: pip-audit --strict || true      # advisory: report, don't block
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t bd-legal-rag .

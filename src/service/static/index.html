@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bangladesh Law Assistant</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<meta name="description" content="Ask questions about the laws of Bangladesh in Bangla or English and get answers grounded in the statutory text, with the section cited.">
+<style>
+  :root {
+    --bg: #fbfaf8; --panel: #fff; --ink: #1b1a17; --muted: #6b675f; --line: #e3ded4;
+    --accent: #1f6f54; --warn: #b4530a; --bad: #a32f2f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#16181a; --panel:#1e2124; --ink:#eceae5; --muted:#9a968e; --line:#2e3236;
+            --accent:#4db38b; --warn:#e0954a; --bad:#e2726b; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:16px/1.7 system-ui,-apple-system,"Noto Sans Bengali","Nirmala UI",sans-serif; }
+  :focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  @media (prefers-reduced-motion: no-preference) { .pulse { animation: pulse 1.4s infinite; } }
+  @keyframes pulse { 50% { opacity:.45 } }
+  .wrap { max-width: 820px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 14px; margin-bottom: 20px; }
+  form { display:flex; gap:8px; flex-wrap:wrap; }
+  input[type=text] { flex:1 1 320px; padding:12px 14px; border:1px solid var(--line);
+    border-radius:10px; background:var(--panel); color:var(--ink); font-size:16px; }
+  button { padding:12px 18px; border:0; border-radius:10px; background:var(--accent);
+    color:#fff; font-size:15px; cursor:pointer; }
+  button[disabled] { opacity:.55; cursor:progress; }
+  .opts { display:flex; gap:16px; align-items:center; color:var(--muted); font-size:14px;
+    margin:10px 2px 0; flex-wrap:wrap; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px;
+    padding:16px 18px; margin-top:18px; }
+  .status { color:var(--muted); font-size:14px; }
+  .answer { white-space:pre-wrap; }
+  .badges { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+  .badge { font-size:12px; padding:3px 9px; border-radius:999px; border:1px solid var(--line);
+    color:var(--muted); }
+  .badge.warn { color:var(--warn); border-color:var(--warn); }
+  .badge.bad { color:var(--bad); border-color:var(--bad); }
+  ol.sources { padding-left:20px; margin:8px 0 0; font-size:14px; }
+  ol.sources li { margin-bottom:6px; }
+  a { color:var(--accent); }
+  .foot { color:var(--muted); font-size:13px; margin-top:28px; }
+  .ex { background:none; border:0; color:var(--accent); cursor:pointer; padding:0; font-size:14px; }
+  .conf { font-size:13px; padding:2px 8px; border-radius:999px; border:1px solid var(--line); }
+  .conf.high { color:var(--accent); border-color:var(--accent); }
+  .conf.medium { color:var(--warn); border-color:var(--warn); }
+  .conf.low { color:var(--bad); border-color:var(--bad); }
+  .fb { display:flex; gap:8px; align-items:center; margin-top:14px; font-size:14px; color:var(--muted); }
+  .fb button { background:var(--panel); color:var(--ink); border:1px solid var(--line);
+    padding:4px 12px; font-size:14px; }
+  .trace { font-size:13px; color:var(--muted); margin-top:10px; }
+  .trace li { margin:2px 0; }
+  @media (max-width:600px) { .wrap { padding:16px 12px 48px } h1 { font-size:19px } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Bangladesh Law Assistant <span style="font-weight:400">· বাংলাদেশ আইন সহায়ক</span></h1>
+  <div class="sub">Answers grounded in the text of the Acts, with the section cited. Ask in Bangla or English.</div>
+
+  <form id="f">
+    <input type="text" id="q" placeholder="ধারা ৩০২ কী বলে?  /  What is the punishment for negligence?" autocomplete="off">
+    <button id="go" type="submit">Ask</button>
+  </form>
+  <div class="opts">
+    <label><input type="checkbox" id="agent"> multi-step search</label>
+    <label>excerpts <input type="number" id="k" value="5" min="1" max="20" style="width:56px"></label>
+    <span id="examples"></span>
+  </div>
+
+  <div class="card" id="out" hidden>
+    <div class="status" id="status"></div>
+    <div class="answer" id="answer"></div>
+    <div class="badges" id="badges"></div>
+    <div id="srcwrap" hidden><strong style="font-size:14px">Sources</strong><ol class="sources" id="sources"></ol></div>
+    <details id="tracewrap" hidden class="trace"><summary>what the agent did</summary><ol id="trace"></ol></details>
+    <div class="fb" id="fbwrap" hidden>
+      <span>Was this useful?</span>
+      <button id="fbup" aria-label="helpful">Yes</button>
+      <button id="fbdown" aria-label="not helpful">No</button>
+      <button id="copy" aria-label="copy link">Copy link</button>
+      <span id="fbmsg" aria-live="polite"></span>
+    </div>
+  </div>
+
+  <div class="foot">Informational only — not legal advice. Always check the official text on
+    the Laws of Bangladesh website before relying on anything here.</div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const EXAMPLES = ["ধারা ৩০২ কী বলে?", "What is causing death by negligence?", "বীমা আইনে সংজ্ঞা কী?"];
+$("examples").innerHTML = EXAMPLES.map(e => `<button class="ex" data-q="${e}">${e}</button>`).join(" · ");
+$("examples").onclick = e => { if (e.target.dataset.q) { $("q").value = e.target.dataset.q; $("f").requestSubmit(); } };
+
+function badge(text, cls="") { const b = document.createElement("span"); b.className = "badge " + cls; b.textContent = text; $("badges").appendChild(b); }
+
+// Open a permalink directly: /a/<id> renders that stored answer.
+(async () => {
+  const m = location.pathname.match(/^\/a\/(\w+)/);
+  if (!m) return;
+  const r = await fetch("/a/" + m[1]);
+  if (!r.ok) return;
+  const d = await r.json();
+  $("q").value = d.question || "";
+  $("out").hidden = false;
+  render(d);
+})();
+
+$("f").onsubmit = async ev => {
+  ev.preventDefault();
+  const question = $("q").value.trim();
+  if (!question) return;
+  const useAgent = $("agent").checked, k = +$("k").value || 5;
+  $("out").hidden = false; $("answer").textContent = ""; $("badges").innerHTML = "";
+  $("sources").innerHTML = ""; $("srcwrap").hidden = true; $("go").disabled = true;
+  $("status").textContent = "searching…";
+  try {
+    // The agent makes several calls and has nothing to stream in between, so it
+    // uses the plain endpoint; single-shot answers stream token by token.
+    if (location.pathname.startsWith("/a/")) { /* permalink handled on load */ }
+    if (useAgent) {
+      const r = await fetch("/ask", {method:"POST", headers:{"content-type":"application/json"},
+        body: JSON.stringify({question, k, agent:true})});
+      render(await r.json());
+    } else {
+      await stream(question, k);
+    }
+  } catch (e) { $("status").textContent = "error: " + e.message; }
+  $("go").disabled = false;
+};
+
+async function stream(question, k) {
+  const r = await fetch("/ask/stream", {method:"POST", headers:{"content-type":"application/json"},
+    body: JSON.stringify({question, k})});
+  if (!r.ok) { render(await r.json()); return; }
+  const reader = r.body.getReader(), dec = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const {value, done} = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, {stream:true});
+    const parts = buf.split("\n\n"); buf = parts.pop();
+    for (const part of parts) {
+      const ev = (part.match(/^event: (.*)$/m) || [])[1];
+      const data = JSON.parse((part.match(/^data: (.*)$/m) || [,"{}"])[1]);
+      if (ev === "status") $("status").textContent = data.stage === "repairing"
+        ? "fixing a failed check (" + (data.failures||[]).join(", ") + ")…" : data.stage + "…";
+      else if (ev === "sources") showSources(data.sources);
+      else if (ev === "token") { $("status").textContent = ""; $("answer").textContent += data.text; }
+      else if (ev === "final") render(data, true);
+      else if (ev === "error") $("status").textContent = "error: " + data.error;
+    }
+  }
+}
+
+function showSources(sources) {
+  if (!sources || !sources.length) return;
+  $("srcwrap").hidden = false;
+  $("sources").innerHTML = sources.map(s =>
+    `<li>[${s.n}] ${s.citation}${s.section_title ? " — " + s.section_title : ""}
+     ${s.url ? `· <a href="${s.url}" target="_blank" rel="noopener">official text</a>` : ""}</li>`).join("");
+}
+
+let currentId = null;
+
+async function sendFeedback(rating) {
+  if (!currentId) return;
+  const comment = rating === "down" ? (prompt("What was wrong? (optional)") || "") : "";
+  await fetch("/feedback", {method:"POST", headers:{"content-type":"application/json"},
+    body: JSON.stringify({id: currentId, rating, comment})});
+  $("fbmsg").textContent = "thanks — logged";
+}
+$("fbup").onclick = () => sendFeedback("up");
+$("fbdown").onclick = () => sendFeedback("down");
+$("copy").onclick = async () => {
+  if (!currentId) return;
+  await navigator.clipboard.writeText(location.origin + "/a/" + currentId);
+  $("fbmsg").textContent = "link copied";
+};
+
+function render(d, streamed=false) {
+  $("status").textContent = "";
+  if (d.degraded && d.sources && d.sources.length) {
+    const excerpts = d.sources.map(s => `[${s.n}] ${s.citation}\n${s.text || ""}`).join("\n\n");
+    $("answer").textContent = "Retrieved provisions (no answering model configured):\n\n" + excerpts;
+  } else if (!streamed || d.repaired || d.refused) {
+    $("answer").textContent = d.answer || d.error || "";
+  }
+  showSources(d.sources);
+  $("badges").innerHTML = "";
+  if (d.refused) badge(d.abstained ? "refused — retrieval too weak" : "not found in the corpus", "warn");
+  if (d.repaired) badge("re-checked once", "warn");
+  (d.failures || []).forEach(f => badge(f, "bad"));
+  if (d.cached) badge("cached");
+  if (d.stop_reason) badge("agent: " + d.stop_reason + " · " + (d.trace||[]).length + " steps");
+  if (d.latency_s) badge(d.latency_s + "s" + (d.llm_calls ? " · " + d.llm_calls + " LLM calls" : ""));
+  if (d.confidence) {
+    const c = document.createElement("span");
+    c.className = "conf " + d.confidence.label;
+    c.textContent = "confidence: " + d.confidence.label;
+    c.title = (d.confidence.why || []).join("; ");
+    $("badges").appendChild(c);
+  }
+  if (d.trace && d.trace.length) {
+    $("tracewrap").hidden = false;
+    $("trace").innerHTML = d.trace.map(t =>
+      `<li>step ${t.step}: ${t.tool || t.type}${t.parallel > 1 ? " ×" + t.parallel : ""}` +
+      `${t.new_excerpts != null ? " → +" + t.new_excerpts + " excerpts" : ""}</li>`).join("");
+  } else { $("tracewrap").hidden = true; }
+  currentId = d.id || null;
+  $("fbwrap").hidden = !currentId;
+  $("fbmsg").textContent = "";
+}
+</script>
+</body>
+</html>
