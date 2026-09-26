@@ -8,23 +8,25 @@ cd $HOME\Desktop\bd-legal-rag
 $py = ".venv\Scripts\python"
 ```
 
-The whole sequence after the download: re-parse (minutes), build the index
+The whole sequence after the download: re-parse (under an hour), build the index
 (hours on a CPU, resumable), then evaluation (an hour or two with a local
 model). Nothing below needs the network except the one-time model downloads.
 
-## 1. Re-parse the downloaded pages (offline)
+## 1. Re-parse the downloaded pages
 
 The scrape stored every page in `data/raw/`. Parsing again from that cache
-applies every parser fix made since the download started; no page is fetched.
+applies every parser fix made since the download started. Without `--offline`
+the few pages that failed during the download are fetched again; everything
+else comes from the cache.
 
 ```powershell
-& $py scripts/ingest.py --offline --out data/processed
-& $py scripts/ingest.py --compact-cache        # gzip any pages still stored as plain .html
+& $py scripts/ingest.py --out data/processed      # retries failed pages; --offline to skip them
+& $py scripts/ingest.py --compact-cache           # gzip any pages still stored as plain .html
 ```
 
 Check `data/processed/stats.json`: act and section counts, languages, and the
-number of omitted sections. `failures.jsonl` lists pages that could not be
-parsed (there should be very few).
+number of omitted sections. `failures.jsonl` lists pages that still could not
+be fetched or parsed (a few dozen at most; running the command again retries them).
 
 ## 2. Build the index
 
