@@ -185,6 +185,7 @@ class TestLegacyBangla(unittest.TestCase):
             "লত্মেগ্য": "লক্ষ্যে", "তত্ত্মগণাত্": "তৎক্ষণাৎ",
             "দুই ব\u200dসরের": "দুই বৎসরের", "বলবৎ \u200d\u200dঅন্য": "বলবৎ অন্য",
             "উ\u200dৎস": "উৎস", "র\u200d্যাব": "র\u200d্যাব",
+            "বত্\u200dসর": "বৎসর", "তত্\u200d\u200dকর্তৃক": "তৎকর্তৃক",
         }
         for broken, fixed in cases.items():
             self.assertEqual(fix_legacy_bangla(broken), fixed, broken)

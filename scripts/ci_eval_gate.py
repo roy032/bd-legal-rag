@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from evalkit.dataset import load_corpus_keys, load_eval, validate  # noqa: E402
 from evalkit.metrics import paired_bootstrap  # noqa: E402
 from evalkit.runner import run_retrieval, summarize  # noqa: E402
-from rag.embed import get_embedder  # noqa: E402
+from rag.embed import embedder_for  # noqa: E402
 from rag.pipeline import add_retrieval_args, build_pipeline  # noqa: E402
 
 
@@ -50,7 +50,7 @@ def main() -> None:
         print("\n".join(f"  - {p}" for p in problems[:20]))
         sys.exit("evaluation set is invalid")
 
-    embedder = get_embedder(args.embedder, model=args.model, index_dir=args.index)
+    embedder = embedder_for(getattr(args, "mode", "dense"), args.embedder, args.model, args.index)
     pipeline = build_pipeline(args, args.index, embedder)
     run = run_retrieval(items, pipeline, k=args.k)
     summary = summarize("ci", {"k": args.k, **pipeline.config.to_dict()}, items, run)

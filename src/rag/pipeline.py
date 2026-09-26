@@ -235,7 +235,7 @@ def add_retrieval_args(ap) -> None:
     ap.add_argument("--multi-query", type=int, default=0, help="N LLM rewrites, fused (costs a call)")
     ap.add_argument("--hyde", action="store_true", help="embed a hypothetical provision (costs a call)")
     ap.add_argument("--mmr-lambda", type=float, help="0..1 relevance/diversity trade-off; omit to disable")
-    ap.add_argument("--boost-in-force", action="store_true", help="push amended/repealed text down")
+    ap.add_argument("--boost-in-force", action="store_true", help="push omitted sections and repealed acts down")
     ap.add_argument("--parent-context", action="store_true", help="answer from the whole section")
     ap.add_argument("--parent-max-chars", type=int, default=4000)
     ap.add_argument("--max-parts-per-section", type=int)

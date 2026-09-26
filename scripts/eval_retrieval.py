@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from evalkit.dataset import load_corpus_keys, load_eval, validate  # noqa: E402
 from evalkit.runner import print_summary, run_retrieval, save, summarize  # noqa: E402
-from rag.embed import get_embedder  # noqa: E402
+from rag.embed import embedder_for  # noqa: E402
 from rag.llm import get_llm  # noqa: E402
 from rag.pipeline import add_retrieval_args, build_pipeline  # noqa: E402
 
@@ -46,7 +46,7 @@ def main() -> None:
                 print(f"  - {p}")
             sys.exit("fix the evaluation set first — bad labels make every number meaningless")
 
-    embedder = get_embedder(args.embedder, model=args.model, index_dir=args.index)
+    embedder = embedder_for(getattr(args, "mode", "dense"), args.embedder, args.model, args.index)
     llm = get_llm(args.provider) if (args.multi_query or args.hyde) else None
     retriever = build_pipeline(args, args.index, embedder, llm=llm)
 

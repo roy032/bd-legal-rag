@@ -48,7 +48,7 @@ def normalize(text: str) -> str:
     text = unicodedata.normalize("NFC", text)
     # Khanda ta: 'ত্' + ZWJ is the legacy spelling of 'ৎ'. Folding it on both the
     # corpus and the query side is what lets "বলবত্‍" match "বলবৎ".
-    text = text.replace("ত্\u200d", "ৎ")
+    text = text.replace("ত্\u200d", "ৎ").replace("ৎ\u200d", "ৎ")
     text = text.replace(" ", " ").replace("‌", "").replace("​", "")
     # The site uses both '।' (dari) and '৷' (Bangla isshar-like) as full stop.
     text = text.replace("৷", "।")
@@ -89,7 +89,7 @@ _LEGACY_FIXES = [
     (re.compile("ত\u200d(?=[^ঀ-৿]|$)"), "ৎ"),   # ত<ZWJ> at a word end -> ৎ
     (re.compile("(?<!্)\u200d(?!্)"), ""),
     # Khanda ta last, so it also catches ত্ produced by the fixes above.
-    (re.compile("ত্(?=[সকপখফশ]|$|[^ঀ-৿])"), "ৎ"),  # বত্সর -> বৎসর, তত্ক্ষণাত্ -> তৎক্ষণাৎ
+    (re.compile("ত্\u200d*(?=[সকপখফশ]|$|[^ঀ-৿\u200d])"), "ৎ"),   # বত্সর -> বৎসর, বত্<ZWJ>সর -> বৎসর
 ]
 
 

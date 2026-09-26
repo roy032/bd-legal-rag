@@ -249,11 +249,11 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         """Load the index and models once, lazily, so startup failures are visible."""
         if state["ready"]:
             return
-        from rag.embed import get_embedder
+        from rag.embed import embedder_for
         from rag.llm import get_llm, get_stream_llm
         from rag.pipeline import build_pipeline, load_records
 
-        embedder = get_embedder(cfg.embedder, model=cfg.model, index_dir=cfg.index)
+        embedder = embedder_for(cfg.retrieval.mode, cfg.embedder, cfg.model, cfg.index)
         state["records"] = state["records"] or load_records(cfg.index, cfg.chunks)
         state["llm"] = state["llm"] or get_llm(cfg.provider)
         state["stream_llm"] = state["stream_llm"] or get_stream_llm(cfg.provider)

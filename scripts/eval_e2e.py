@@ -27,7 +27,7 @@ from evalkit.runner import (  # noqa: E402
 )
 from rag.agent import AgentConfig, LegalAgent  # noqa: E402
 from rag.answer import answer_question, format_context  # noqa: E402
-from rag.embed import get_embedder  # noqa: E402
+from rag.embed import embedder_for  # noqa: E402
 from rag.guardrails import GuardConfig  # noqa: E402
 from rag.llm import get_llm  # noqa: E402
 from rag.pipeline import add_retrieval_args, build_pipeline, load_records  # noqa: E402
@@ -73,7 +73,7 @@ def main() -> None:
     if args.limit:
         items = items[: args.limit]
 
-    embedder = get_embedder(args.embedder, model=args.model, index_dir=args.index)
+    embedder = embedder_for(getattr(args, "mode", "dense"), args.embedder, args.model, args.index)
     llm = get_llm(args.provider, args.llm_model)
     judge = None if args.no_judge else get_llm(args.judge_provider, args.judge_model)
     retriever = build_pipeline(args, args.index, embedder, llm=llm)

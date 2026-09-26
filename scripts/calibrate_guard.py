@@ -27,7 +27,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from evalkit.dataset import load_eval, section_key  # noqa: E402
-from rag.embed import get_embedder  # noqa: E402
+from rag.embed import embedder_for  # noqa: E402
 from rag.pipeline import add_retrieval_args, build_pipeline  # noqa: E402
 
 
@@ -44,7 +44,7 @@ def main() -> None:
     args = ap.parse_args()
 
     items = load_eval(args.eval)
-    embedder = get_embedder(args.embedder, model=args.model, index_dir=args.index)
+    embedder = embedder_for(getattr(args, "mode", "dense"), args.embedder, args.model, args.index)
     pipeline = build_pipeline(args, args.index, embedder)
 
     rows = []

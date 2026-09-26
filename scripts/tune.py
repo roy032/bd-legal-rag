@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from evalkit.dataset import load_eval  # noqa: E402
 from evalkit.metrics import aggregate  # noqa: E402
 from evalkit.runner import run_retrieval  # noqa: E402
-from rag.embed import get_embedder  # noqa: E402
+from rag.embed import embedder_for  # noqa: E402
 from rag.pipeline import RetrievalConfig, SearchPipeline, build_pipeline  # noqa: E402
 
 
@@ -51,7 +51,7 @@ def main() -> None:
                  f"or pass --i-know-this-is-my-test-set if you really mean it.")
 
     items = load_eval(args.eval)
-    embedder = get_embedder(args.embedder, model=args.model, index_dir=args.index)
+    embedder = embedder_for(getattr(args, "mode", "dense"), args.embedder, args.model, args.index)
     base = build_pipeline(RetrievalConfig(mode=args.mode, expand_refs=True, synonyms=True,
                                           route=False),
                           args.index, embedder)

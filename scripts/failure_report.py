@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from evalkit.dataset import load_corpus_keys, load_eval, section_key  # noqa: E402
 from evalkit.diagnose import diagnose  # noqa: E402
-from rag.embed import get_embedder  # noqa: E402
+from rag.embed import embedder_for  # noqa: E402
 from rag.pipeline import add_retrieval_args, build_pipeline  # noqa: E402
 
 
@@ -41,7 +41,7 @@ def main() -> None:
 
     items = load_eval(args.eval)
     corpus_keys = load_corpus_keys(args.chunks) if Path(args.chunks).exists() else None
-    embedder = get_embedder(args.embedder, model=args.model, index_dir=args.index)
+    embedder = embedder_for(getattr(args, "mode", "dense"), args.embedder, args.model, args.index)
     pipeline = build_pipeline(args, args.index, embedder)
 
     answers = {}

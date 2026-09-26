@@ -116,6 +116,12 @@ def get_embedder(kind: str = "st", model: str = "BAAI/bge-m3", index_dir=None, *
     return SentenceTransformerEmbedder(model_name=model, **kw)
 
 
+def embedder_for(mode: str, kind: str = "auto", model: str = "BAAI/bge-m3", index_dir=None) -> Embedder | None:
+    """The query embedder a retrieval mode needs: none for pure BM25, so a
+    BM25-only index works without downloading or loading an embedding model."""
+    return None if mode == "bm25" else get_embedder(kind, model=model, index_dir=index_dir)
+
+
 def _from_index(index_dir, model: str, kw: dict) -> tuple[str, str, dict]:
     import json
     from pathlib import Path
