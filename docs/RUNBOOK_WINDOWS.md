@@ -31,8 +31,10 @@ be fetched or parsed (a few dozen at most; running the command again retries the
 ## 2. Build the index
 
 bge-m3 (≈2.3 GB, downloaded once from Hugging Face) embeds every chunk. On a
-CPU this is the slow step. It checkpoints every 2,000 chunks, so if it is
-interrupted just run the same command again and it continues.
+laptop CPU that is days for the full corpus (measured: ~0.1 chunks/s), so build
+it on a free Kaggle GPU instead (about 30 minutes): see `kaggle/README.md`.
+The CPU command below still works for small corpora; it checkpoints every
+2,000 chunks and resumes if interrupted.
 
 ```powershell
 & $py scripts/build_index.py --chunks data/processed/chunks.jsonl --out data/index --bm25

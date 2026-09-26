@@ -4,6 +4,7 @@
   python scripts/build_index.py                          # bge-m3 + numpy index
   python scripts/build_index.py --embedder hashing       # offline, no model download
   python scripts/build_index.py --backend qdrant         # needs a running Qdrant
+  python scripts/build_index.py --bm25 --batch-size 64 --fp16   # on a GPU (Kaggle: kaggle/)
 """
 from __future__ import annotations
 
@@ -85,7 +86,8 @@ def main() -> None:
     ap.add_argument("--model", default="BAAI/bge-m3")
     ap.add_argument("--backend", choices=["numpy", "qdrant"], default="numpy")
     ap.add_argument("--collection", default="bdlaws")
-    ap.add_argument("--batch-size", type=int, default=8)
+    ap.add_argument("--batch-size", type=int, default=8, help="8 on a CPU; 64+ on a GPU")
+    ap.add_argument("--fp16", action="store_true", help="half-precision embedding (GPU only)")
     ap.add_argument("--bm25", action="store_true", help="also build a BM25 index (needed for hybrid)")
     ap.add_argument("--bm25-stem", action="store_true", help="strip common Bangla suffixes")
     ap.add_argument("--bm25-only", action="store_true", help="skip embeddings entirely")
@@ -110,7 +112,7 @@ def main() -> None:
         if args.bm25_only:
             return
 
-    kw = {"batch_size": args.batch_size} if args.embedder == "st" else {}
+    kw = {"batch_size": args.batch_size, "half": args.fp16} if args.embedder == "st" else {}
     embedder = get_embedder(args.embedder, model=args.model, **kw)
     print(f"embedder: {embedder.name} (dim {embedder.dim})")
 

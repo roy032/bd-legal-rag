@@ -6,8 +6,6 @@ results/*.json
 __pycache__/
 *.pyc
 .venv/
-.mypy_cache/
-.ruff_cache/
-*.egg-info/
-.coverage
-.env
+
+# Kaggle upload bundle (scripts/make_kaggle_bundle.py)
+kaggle_upload/

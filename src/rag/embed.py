@@ -48,11 +48,13 @@ def l2_normalize(m: np.ndarray) -> np.ndarray:
 
 class SentenceTransformerEmbedder:
     def __init__(self, model_name: str = "BAAI/bge-m3", device: str | None = None,
-                 batch_size: int = 8, max_seq_length: int | None = 1024) -> None:
+                 batch_size: int = 8, max_seq_length: int | None = 1024, half: bool = False) -> None:
         from sentence_transformers import SentenceTransformer  # lazy: heavy import
 
         self.name = model_name
         self.model = SentenceTransformer(model_name, device=device)
+        if half and str(self.model.device).startswith("cuda"):
+            self.model.half()        # GPU only: ~2x faster; cosine scores change by < 1e-3
         if max_seq_length:
             self.model.max_seq_length = max_seq_length
         self.batch_size = batch_size
