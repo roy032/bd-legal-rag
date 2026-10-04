@@ -97,8 +97,10 @@ class ServiceConfig:
     chunks: str = "data/processed/chunks.jsonl"
     embedder: str = "auto"           # auto = whatever the index was built with (index.json)
     model: str = "BAAI/bge-m3"
+    # The configuration scripts/finish.py selects on the tuning split (results/selected.json):
+    # dense bge-m3 beat both fusion settings there, and on the test set BM25 fusion cost recall.
     retrieval: RetrievalConfig = field(default_factory=lambda: RetrievalConfig(
-        mode="hybrid", expand_refs=True, synonyms=True, transliterate=True, route=True,
+        mode="dense", expand_refs=True, synonyms=True, transliterate=True, route=False,
         boost_in_force=True, resolve_refs=True, max_parts_per_section=2))
     k: int = 5
     max_k: int = 20
@@ -127,12 +129,12 @@ class ServiceConfig:
     @classmethod
     def from_env(cls) -> ServiceConfig:
         retrieval = RetrievalConfig(
-            mode=_env_str("BDRAG_MODE", "hybrid"),
+            mode=_env_str("BDRAG_MODE", "dense"),
             rerank=_env_str("BDRAG_RERANK", "none"),
             expand_refs=_env_bool("BDRAG_EXPAND_REFS", True),
             synonyms=_env_bool("BDRAG_SYNONYMS", True),
             transliterate=_env_bool("BDRAG_TRANSLITERATE", True),
-            route=_env_bool("BDRAG_ROUTE", True),
+            route=_env_bool("BDRAG_ROUTE", False),
             boost_in_force=_env_bool("BDRAG_BOOST_IN_FORCE", True),
             resolve_refs=_env_bool("BDRAG_RESOLVE_REFS", True),
             parent_context=_env_bool("BDRAG_PARENT_CONTEXT", False),

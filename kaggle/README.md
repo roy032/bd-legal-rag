@@ -1,5 +1,20 @@
 # Building the index on a Kaggle GPU
 
+## Automated (recommended)
+
+```powershell
+cd $HOME\Desktop\bd-legal-rag
+.venv\Scripts\pip install kaggle              # once; token: kaggle.com -> Settings -> API -> Create New Token
+.venv\Scripts\python scripts\finish.py
+```
+
+`scripts/finish.py` waits for (or starts) the Kaggle index build, installs the index
+into `data/index`, runs the ablation, tuning, failure analysis and abstention
+calibration, the Ollama answer evaluation if Ollama is installed, writes
+`results/RESULTS.md` and the README "Results" section, runs the tests and commits.
+
+## By hand
+
 Embedding all ~44k chunks with bge-m3 runs at about 0.1 chunks/second on a
 laptop CPU (days). On a free Kaggle T4 it takes roughly half an hour.
 

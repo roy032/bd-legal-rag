@@ -16,7 +16,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CODE = ["src", "scripts", "pyproject.toml", "requirements.txt"]
+CODE = ["src", "scripts", "data/eval", "pyproject.toml", "requirements.txt"]
 SKIP = {"__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache"}
 PART_BYTES = 9_000_000        # compressed size per part
 

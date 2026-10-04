@@ -101,7 +101,8 @@ def ollama_llm(model: str | None = None, host: str = "http://localhost:11434",
             "model": model, "system": system, "prompt": prompt, "stream": False,
             "options": {"temperature": 0, "num_predict": DEFAULT_MAX_TOKENS,
                         "num_ctx": OLLAMA_NUM_CTX}})
-        r.raise_for_status()
+        if r.status_code >= 400:          # Ollama explains itself in the body ("model not found")
+            raise RuntimeError(f"Ollama HTTP {r.status_code} for model {model!r}: {r.text[:300]}")
         return r.json().get("response", "")
 
     return call

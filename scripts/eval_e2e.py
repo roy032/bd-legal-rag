@@ -29,7 +29,7 @@ from rag.agent import AgentConfig, LegalAgent  # noqa: E402
 from rag.answer import answer_question, format_context  # noqa: E402
 from rag.embed import embedder_for  # noqa: E402
 from rag.guardrails import GuardConfig  # noqa: E402
-from rag.llm import get_llm  # noqa: E402
+from rag.llm import LLMError, get_llm  # noqa: E402
 from rag.pipeline import add_retrieval_args, build_pipeline, load_records  # noqa: E402
 
 
@@ -84,19 +84,29 @@ def main() -> None:
                         AgentConfig(max_steps=args.max_steps, per_call_k=args.k, guard=guard))
              if args.agent else None)
     search_kw = {}
-    generation, answers, evidence = [], [], []
+    generation, answers, evidence, errors = [], [], [], []
     for n, it in enumerate(items, 1):
       for repeat in range(args.repeats):
-        ans = (agent.run(it.question) if agent else
-               answer_question(it.question, retriever, llm, k=args.k,
-                               sandwich=not args.no_sandwich, guard=guard, **search_kw))
+        try:
+            ans = (agent.run(it.question) if agent else
+                   answer_question(it.question, retriever, llm, k=args.k,
+                                   sandwich=not args.no_sandwich, guard=guard, **search_kw))
+        except LLMError as e:
+            # One slow or failed model call should cost one question, not the whole run.
+            # Skipped questions are counted in the summary, never silently dropped.
+            errors.append({"id": it.id, "error": str(e)[:300]})
+            print(f"[{n}/{len(items)}] {it.id} ERROR {str(e)[:120]}")
+            continue
         row = {"id": f"{it.id}#{repeat}" if args.repeats > 1 else it.id,
                **deterministic_scores(it, ans)}
         if agent:
             row["agent_steps"] = float(ans.checks.get("steps", 0))
             row["llm_calls"] = float(ans.llm_calls)
         if judge:
-            row.update(judge_answer(it, ans, judge, format_context(ans.hits)))
+            try:
+                row.update(judge_answer(it, ans, judge, format_context(ans.hits)))
+            except LLMError as e:
+                errors.append({"id": it.id, "error": "judge: " + str(e)[:300]})
         generation.append(row)
         evidence.append(ans.hits)
         answers.append({"id": it.id, "repeat": repeat, "question": it.question,
@@ -126,7 +136,8 @@ def main() -> None:
               "eval": args.eval, "agent": bool(agent), "max_steps": args.max_steps,
               "repeats": args.repeats,
               "min_score": args.min_score,
-              "repair": not args.no_repair, **retriever.config.to_dict()}
+              "repair": not args.no_repair, "llm_errors": len(errors),
+              "llm_error_ids": [e["id"] for e in errors], **retriever.config.to_dict()}
     summary = summarize(args.label, config, items, run, generation=generation)
     print_summary(summary)
     path = save(summary, run, args.results, args.label, generation=generation)

@@ -9,3 +9,4 @@ __pycache__/
 
 # Kaggle upload bundle (scripts/make_kaggle_bundle.py)
 kaggle_upload/
+results/finish.log

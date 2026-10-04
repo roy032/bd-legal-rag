@@ -12,11 +12,12 @@ Acts with the section cited — or an honest refusal when the corpus does not an
    │  dense vectors (bge-m3)          BM25 (Bangla-aware tokenizer)     │◄┘
    └───────────┬──────────────────────────────┬────────────────────────-┘
                │                              │
- question ──► expand "ধারা ৩০২"→"section 302" │
-               ├─ dense top-50 ───────┐       │
-               └─ BM25 top-50 ────────┼── reciprocal rank fusion
-                                      │            │
-                          dedupe section parts ── cross-encoder rerank → top 5
+ question ──► resolve "দণ্ডবিধির ধারা ৩০২" to the section itself
+          ──► expand refs, legal synonyms, romanised Bangla
+               ├─ dense top-50 (served) ─┐    │
+               └─ BM25 top-50 ───────────┼── reciprocal rank fusion (measured, not served)
+                                         │            │
+                 in-force boost · dedupe section parts ── cross-encoder rerank (measured, CPU-slow)
                                                            │
                     support gate (refuse if weak) ─────────┤
                                                            ▼
@@ -28,6 +29,25 @@ Acts with the section cited — or an honest refusal when the corpus does not an
                            HTTP API + streaming UI · metrics · cache
 ```
 
+<!-- auto:headline -->
+| Measured on the full corpus (86 test questions) | |
+|---|---|
+| Right section in the top 5 (retrieval) | 0.85 [0.77–0.91] |
+| Citations that point at a retrieved excerpt (qwen2.5:7b) | 0.99 [0.97–1.00] |
+| Citations that point at a retrieved excerpt (qwen2.5:14b) | 1.00 [1.00–1.00] |
+| Refuses exactly when the corpus has no answer (qwen2.5:7b) | 0.86 [0.79–0.93] |
+| Refuses exactly when the corpus has no answer (qwen2.5:14b) | 0.91 [0.84–0.96] |
+| Answer judged correct against the reference (qwen2.5:7b) | 0.53 [0.45–0.62] |
+| Answer judged correct against the reference (qwen2.5:14b) | 0.71 [0.64–0.77] |
+
+95% bootstrap intervals; details in [Results](#results).
+<!-- /auto:headline -->
+
+Every stage in the diagram is implemented and switchable; which ones the service
+uses was decided by measurement (see [Results](#results)): on the full corpus, dense
+retrieval with reference resolution beat every BM25 fusion setting, and the
+cross-encoder, although the most accurate, takes minutes per query on a laptop CPU.
+
 An agent mode sits alongside the single-shot path: the model calls `search`,
 `get_section` and `follow_refs` itself for multi-hop and cross-reference questions.
 
@@ -35,7 +55,7 @@ An agent mode sits alongside the single-shot path: the model calls `search`,
 
 ```bash
 pip install -e ".[serve]"     # or: make install
-make test                     # 202 tests, all offline — no API key, no model download
+make test                     # 243 tests, all offline — no API key, no model download
 make demo                     # full pipeline + ablation on the bundled sample corpus
 make serve                    # API + UI on :8000
 ```
@@ -46,7 +66,7 @@ Then on real data:
 python scripts/ingest.py --year-from 2000 --limit 30     # scrape, parse, chunk
 python scripts/build_index.py --bm25                     # dense + lexical indexes
 export RAG_LLM=anthropic ANTHROPIC_API_KEY=sk-...        # or openai, or ollama (free)
-python scripts/ask.py --mode hybrid --expand-refs "ধারা ৩০২ কী বলে?"
+python scripts/ask.py --mode dense --expand-refs --resolve-refs "ধারা ৩০২ কী বলে?"
 make serve                                               # API + UI on :8000
 ```
 
@@ -86,28 +106,156 @@ what is deliberately left.
 
 ## Results
 
-Fill this in from your own run — `python scripts/ablate.py --out results/ablation.md`
-writes exactly this table, with 95% confidence intervals and a paired verdict per row.
+Measured on the full corpus (43,966 chunks) with the 96-question evaluation set in `data/eval/eval.jsonl`; 95% bootstrap intervals, paired tests against the dense baseline. Regenerate everything with `python scripts/finish.py`.
 
-| run | pipeline | recall@5 | MRR | faithfulness | p95 latency |
-|---|---|---|---|---|---|
-| baseline | dense | — | — | — | — |
-| + BM25 | hybrid | — | — | — | — |
-| + section-ref expansion | hybrid +refs | — | — | — | — |
-| + cross-encoder rerank | hybrid +refs +rerank | — | — | — | — |
+### Retrieval ablation
 
-Numbers without an interval, or a claim of improvement that the paired test calls
-"within noise", is the failure mode this repo is built to avoid.
+| run | pipeline | k | recall@5 | recall@10 | mrr | ndcg@5 | p95 latency (ms) |
+|---|---|---|---|---|---|---|---|
+| bm25 | bm25 | 10 | 0.372 [0.27–0.48] | 0.436 [0.33–0.55] | 0.270 [0.19–0.36] | 0.287 [0.21–0.38] | 101 |
+| dense | dense | 10 | 0.808 [0.72–0.88] | 0.884 [0.81–0.95] | 0.695 [0.61–0.78] | 0.706 [0.62–0.78] | 457 |
+| hybrid | hybrid | 10 | 0.669 [0.57–0.77] | 0.756 [0.66–0.84] | 0.520 [0.43–0.61] | 0.542 [0.45–0.63] | 504 |
+| +refs | hybrid +refs | 10 | 0.669 [0.58–0.77] | 0.756 [0.67–0.84] | 0.520 [0.43–0.61] | 0.541 [0.45–0.63] | 583 |
+| +dedupe | hybrid +refs +dedupe2 | 10 | 0.669 [0.58–0.77] | 0.756 [0.67–0.84] | 0.520 [0.43–0.61] | 0.541 [0.45–0.63] | 608 |
+| +synonyms | hybrid +refs +dedupe2 +syn +translit | 10 | 0.674 [0.58–0.77] | 0.773 [0.69–0.85] | 0.505 [0.41–0.60] | 0.532 [0.44–0.62] | 627 |
+| +route | hybrid +refs +dedupe2 +syn +translit +route | 10 | 0.686 [0.59–0.78] | 0.791 [0.71–0.87] | 0.511 [0.42–0.60] | 0.539 [0.44–0.63] | 630 |
+| +resolve | hybrid +refs +dedupe2 +syn +translit +route +resolve | 10 | 0.733 [0.64–0.83] | 0.837 [0.76–0.91] | 0.567 [0.48–0.65] | 0.593 [0.51–0.68] | 829 |
+| +in-force | hybrid +refs +dedupe2 +syn +translit +route +resolve +in-force | 10 | 0.733 [0.64–0.83] | 0.837 [0.76–0.91] | 0.567 [0.48–0.65] | 0.593 [0.51–0.68] | 884 |
+| +rerank | hybrid +refs +rerank(cross) +dedupe2 +syn +translit +route +resolve +in-force | 10 | 0.878 [0.80–0.94] | 0.948 [0.90–0.99] | 0.749 [0.67–0.82] | 0.770 [0.70–0.84] | 109172 |
+
+```
+Paired comparison on recall@5 vs 'dense' (same questions, 2000 resamples):
+  bm25                       -0.436 [-0.547, -0.326]  worse  (n=86)
+  hybrid                     -0.140 [-0.233, -0.041]  worse  (n=86)
+  +refs                      -0.140 [-0.233, -0.041]  worse  (n=86)
+  +dedupe                    -0.140 [-0.233, -0.041]  worse  (n=86)
+  +synonyms                  -0.134 [-0.244, -0.023]  worse  (n=86)
+  +route                     -0.122 [-0.233, -0.017]  worse  (n=86)
+  +resolve                   -0.076 [-0.192, +0.035]  within noise  (n=86)
+  +in-force                  -0.076 [-0.192, +0.035]  within noise  (n=86)
+  +rerank                    +0.070 [-0.017, +0.157]  within noise  (n=86)
+```
+
+### Served configuration
+
+Chosen on the tuning split (recall@5: dense 0.773, hybrid-routed 0.568, hybrid-tuned 0.773), then measured once on the test set: **dense**.
+
+| recall@5 | recall@10 | MRR |
+|---|---|---|
+| 0.849 [0.77–0.91] | 0.901 [0.83–0.96] | 0.772 [0.69–0.85] |
+
+`--mode dense --expand-refs --synonyms --transliterate --resolve-refs --boost-in-force --max-parts-per-section 2`
+
+### Fusion weights (tuned on the separate 24-question tuning split)
+
+```json
+{
+ "dense_weight": 1.0,
+ "bm25_weight": 0.5,
+ "rrf_k": 10,
+ "candidates": 50,
+ "recall@5": 0.7727
+}
+```
+
+### Abstention threshold (`calibrate_guard.py`, served configuration)
+
+```
+ min_score  answer_rate  gold_kept  correct_abstain   score
+    0.0321         1.00       0.86             0.00   0.430
+    0.0989         0.94       0.83             0.00   0.413
+    0.1657         0.94       0.83             0.00   0.413
+    0.2325         0.94       0.83             0.00   0.413
+    0.2993         0.94       0.83             0.00   0.413
+    0.3661         0.94       0.83             0.00   0.413
+    0.4329         0.94       0.83             0.00   0.413
+    0.4997         0.94       0.83             0.10   0.463
+    0.5666         0.92       0.80             0.40   0.601
+    0.6334         0.69       0.62             1.00   0.808
+    0.7002         0.17       0.17             1.00   0.587
+    0.7670         0.01       0.01             1.00   0.506
+```
+
+No threshold fits both goals: refusing most unanswerable questions also refuses a large share of answerable ones, because the top dense score of an off-topic question is often as high as that of a hard real one. The service therefore ships without a score threshold (`BDRAG_MIN_SCORE` unset) and relies on the answer prompt, which tells the model to refuse when the excerpts do not answer, and on the citation checks.
+
+### End to end (answers by a local Ollama model, judged by llama3.1:8b, on a Kaggle T4)
+
+Same retrieval, same five excerpts per question, two answering models fixed in advance.
+
+| | qwen2.5:7b | qwen2.5:14b |
+|---|---|---|
+| Correct (judge vs. reference answer) | 0.535 [0.45–0.62] | 0.709 [0.64–0.77] |
+| Faithful to the cited excerpts (judge) | 0.562 [0.46–0.67] | 0.406 [0.31–0.51] |
+| Cites a gold section | 0.698 [0.60–0.79] | 0.767 [0.69–0.85] |
+| Citations point at retrieved excerpts | 0.990 [0.97–1.00] | 1.000 [1.00–1.00] |
+| Refuses exactly when it should | 0.865 [0.79–0.93] | 0.906 [0.84–0.96] |
+
+The judge is itself an 8B model: its scores are indicative, and the deterministic rows (citations, refusals) are the ones to trust most.
 
 ## Failure analysis
 
-Replace this with what actually breaks in your run — it is the most valuable section in
-the README, and the one interviewers read most carefully. Things worth checking:
+<!-- auto:failures -->
+Served configuration, 86 test questions: **66 fully correct**.
 
-- questions where the gold section was retrieved but the answer cited a different one
-- Bangla paraphrases that miss when the section uses formal legal vocabulary
-- sections whose text is dominated by amendment footnotes
-- questions the system refuses that it could have answered (your `--min-score` is too high)
+| Where it failed | Questions | Meaning |
+|---|---|---|
+| retrieval miss | 1 | no gold section among the top 50 candidates |
+| ranking miss | 11 | a gold section in the top 50, but not among the excerpts the model saw |
+| citation miss | 8 | the gold section was retrieved but the answer cited another |
+
+By question type (failures / total):
+
+- exact_ref: 2 / 7
+- multi: 2 / 6
+- paraphrase: 3 / 10
+- single: 13 / 63
+
+The misses, verbatim:
+
+- `ranking_miss` (single, en) What is the punishment for murder in Bangladesh?
+- `citation_miss` (multi, bn) অবহেলা করে গাড়ি চালিয়ে কারো মৃত্যু ঘটালে কী শাস্তি হতে পারে?
+- `citation_miss` (exact_ref, bn) দণ্ডবিধির ধারা ৩৪ কী বলে?
+- `ranking_miss` (multi, bn) জাল দলিল বানানোর শাস্তি কী?
+- `ranking_miss` (single, en) Is attempting suicide a crime in Bangladesh?
+- `citation_miss` (exact_ref, en) What does Article 27 of the Constitution say?
+- `ranking_miss` (paraphrase, en) Can the state take away someone's life or liberty?
+- `ranking_miss` (single, bn) রাষ্ট্রপতি কীভাবে নির্বাচিত হন?
+- `ranking_miss` (single, en) How much maternity leave does a female worker get under the Labour Act?
+- `citation_miss` (single, bn) স্থায়ী শ্রমিককে ছাঁটাই ছাড়া চাকরি থেকে বাদ দিতে মালিককে কত দিনের নোটিশ দিতে হয়?
+- `ranking_miss` (single, mixed) Labour Act অনুযায়ী maternity leave কত দিন?
+- `ranking_miss` (single, bn) পুলিশের কাছে দেওয়া স্বীকারোক্তি কি আদালতে প্রমাণ হিসেবে ব্যবহার করা যায়?
+- `ranking_miss` (single, en) What is the punishment for kidnapping a woman or child?
+- `ranking_miss` (paraphrase, bn) দোকানদার ওজনে কম দিলে কী শাস্তি হয়?
+- `citation_miss` (single, en) Who fixes the standard rent of a house?
+- `citation_miss` (single, en) Which documents must be registered compulsorily?
+- `ranking_miss` (single, en) What counts as dowry under the Dowry Prohibition Act 2018?
+- `citation_miss` (single, mixed) RTI আবেদন করে কত দিনে তথ্য পাব?
+- `retrieval_miss` (paraphrase, en) Someone threw me out of my land without legal process. Can I get it back quickly?
+- `citation_miss` (single, bn) আইনগত সহায়তার জন্য কোথায় আবেদন করতে হয়?
+<!-- /auto:failures -->
+
+What the misses have in common (answers from qwen2.5:14b):
+
+- **Ranking is the largest bucket.** In 11 of the 20 misses a gold section is among the top
+  50 candidates but not among the five excerpts the model sees. They are questions about
+  well-known provisions (murder, kidnapping, maternity leave, confessions to the police)
+  where many sections, amendments and other acts share the same vocabulary. The
+  cross-encoder fixes most of these (0.878 recall@5), so a GPU reranker over the top 20 is
+  the clearest next step; on a laptop CPU it costs minutes per query.
+- **Citation is the second.** In 8 misses the gold section was in front of the model and
+  it cited a neighbouring excerpt instead, including two questions that name the section
+  (দণ্ডবিধির ধারা ৩৪, Article 27): retrieval resolves the reference correctly every time,
+  but the answer can still lean on a definition or a related section. Putting the resolved
+  section first and labelling it in the prompt is the targeted fix.
+- **Colloquial paraphrase is the one true retrieval miss.** "Someone threw me out of my
+  land" shares almost no wording with the statute's language about a person dispossessed
+  of immovable property; query rewriting (`--multi-query` / `--hyde`, one model call
+  each) is the targeted fix.
+- **The larger model trades citations for coverage.** qwen2.5:14b answers more questions
+  correctly (0.71 vs 0.54) and refuses answerable ones less often, but it writes about one
+  citation per answer against 1.45 for the 7B model, so the judge finds more uncited
+  statements and scores it lower on faithfulness. Every citation it does make points at a
+  retrieved excerpt.
 
 ## Deployment
 
@@ -142,739 +290,6 @@ models and generated OpenAPI docs.
 
 ## How it was built
 
-The sections below are the build log, one phase at a time: what was added, why, and what
-was deliberately left out. They double as the notes for explaining the project.
-
----
-
-## Phase 1: Ingestion
-
-A bilingual (Bangla + English) RAG assistant for Bangladeshi law.
-This phase turns the Laws of Bangladesh website (bdlaws.minlaw.gov.bd) into clean,
-structured, retrieval-ready chunks.
-
-```
-index page ──► act pages ──► section pages ──► parse ──► chunk ──► data/processed/*.jsonl
-               (TOC: chapters + section links)
-```
-
-## Quick start
-
-```bash
-python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-
-python -m unittest discover -s tests -v                # 10 tests, should all pass
-
-# 1) One act first — look at the output before scaling up
-python scripts/ingest.py --act-ids 1037 --show 3       # Insurance Act, 2010
-
-# 2) A starter corpus
-python scripts/ingest.py --year-from 2000 --limit 30 --show 5
-```
-
-The first run downloads pages at 1 request/second and caches them in `data/raw/`.
-Every later run re-parses from the cache, so it takes seconds and doesn't touch the server.
-
-## Output (`data/processed/`)
-
-| File | One line per | Used for |
-|---|---|---|
-| `acts.jsonl` | act: title, act number, date, year, language, repealed flag, table of contents | filters, act-level questions |
-| `sections.jsonl` | section: clean text + amendment footnotes | evaluation labels, debugging |
-| `chunks.jsonl` | chunk: `text` (to embed), `body` (to show/cite), `metadata` | **Phase 2 input** |
-| `stats.json` | run | quick check on parser quality |
-
-An example chunk:
-
-```json
-{
-  "chunk_id": "1037-38212-1",
-  "text": "বীমা আইন, ২০১০ > প্রথম অধ্যায় - প্রারম্ভিক > ধারা ১: সংক্ষিপ্ত শিরোনাম ও প্রবর্তন\n\n(১) এই আইন ...",
-  "body": "(১) এই আইন ...",
-  "metadata": {"type": "section", "act_year": 2010, "language": "bn", "section_number_ascii": "1",
-               "refs": [], "amended": false, "part": 1, "n_parts": 1, "url": "..."}
-}
-```
-
-## Design decisions (and interview talking points)
-
-1. **Chunk by legal structure, not by token count.** A section is the unit people cite
-   ("ধারা ৩০২"), so it is the unit we retrieve. Fixed 500-token windows would cut clauses
-   in half and mix unrelated sections.
-2. **Long sections are split at clause boundaries** — `(১)`, `(ক)`, `(a)` — and each later
-   part repeats the lead-in ("In this Act, unless the context otherwise requires—"),
-   which gives meaning to the clauses that follow.
-3. **Context header in every chunk.** `Act > Chapter > Section: title` is prepended to
-   the embedded text, so a chunk that only says "(2) The fine shall not exceed..." still
-   matches a question about *that* act. `body` stays clean for citations.
-4. **An overview chunk per act** (preamble + table of contents) answers "What does the
-   Insurance Act cover?", which no single section can answer.
-5. **Metadata for later phases:** `language` (filters, per-language evaluation),
-   `repealed` (don't cite dead law), `refs` (cross-references to follow in multi-hop
-   retrieval, Phase 6), `amended` + `footnotes` (surface amendment history).
-6. **Unicode normalization.** Bangla has two encodings of য়/ড়/ঢ়. Text *and* regexes
-   are NFC-normalized, or matching fails silently.
-7. **Selectors don't depend on CSS class names.** The parser uses URL patterns and
-   document order, and finds the section body as the tightest block holding ≥80% of the
-   page's non-link text. That survives cosmetic changes to the site.
-8. **Polite and reproducible.** A rate limit, retries with backoff, an honest User-Agent
-   (put your email in `fetch.py`), and a raw-HTML cache.
-
-## Checking the output (do this)
-
-After each run, look at `stats.json`:
-
-- `sections_empty` should be ~0. If not, open that page in `data/raw/` and see why.
-- `acts_without_sections` > 0 means those TOCs didn't parse.
-- `chunk_chars.max` should be ≤ `--max-chars`.
-- Read 10–20 random chunks with `--show 20`. Most parser bugs are obvious once you look.
-
-Then copy 2–3 **real** pages from `data/raw/` into `tests/fixtures/` and add tests for
-them. The current fixtures are synthetic pages built to match the site's observed structure.
-
-## Known limitations / TODO
-
-- **Schedules (তফসিল) and forms** are not linked as sections and are skipped for now.
-- **Repealed detection** is a text heuristic. Verify it on a few known repealed acts.
-- **Footnote detection** takes trailing lines that start with a number and mention
-  substituted/inserted/omitted (প্রতিস্থাপিত/সন্নিবেশিত/বিলুপ্ত). Check it against real pages.
-- **Tables inside sections** are flattened to text.
-
----
-
-## Phase 2: Baseline RAG (embed → index → retrieve → answer)
-
-```
-chunks.jsonl ──► embed ──► vector index ──► top-k ──► prompt ──► LLM ──► answer + citations
-```
-
-## Quick start
-
-```bash
-pip install -r requirements.txt
-python -m unittest discover -s tests -v        # 29 tests, all offline
-
-# Smoke test without any model download or API key (sample corpus included):
-python scripts/build_index.py --chunks data/sample/chunks.jsonl --out data/sample/index --embedder hashing
-python scripts/ask.py --index data/sample/index --embedder hashing --provider echo --show-context "সংজ্ঞা কী?"
-
-# The real thing, on your scraped corpus:
-python scripts/build_index.py                  # BAAI/bge-m3 over data/processed/chunks.jsonl
-export RAG_LLM=anthropic ANTHROPIC_API_KEY=sk-...     # or openai, or ollama (free, local)
-python scripts/ask.py "হত্যার শাস্তি কী?" -k 5 --show-context
-```
-
-## What's in `src/rag/`
-
-| File | What it does | Why it's separate |
-|---|---|---|
-| `embed.py` | `SentenceTransformerEmbedder` (bge-m3) and `HashingEmbedder` (offline, lexical) | swapping embedders is one flag, which is what Phase 4's ablation table needs |
-| `store.py` | `NumpyStore` (exact cosine search, saves to disk) and `QdrantStore` (HNSW, server-side filters) | exact search is the ground truth you measure approximate search against |
-| `retrieve.py` | query → filtered top-k; over-fetch + dedupe by section | filters (language, act, repealed) are retrieval quality, not plumbing |
-| `llm.py` | Anthropic / OpenAI / Ollama / offline stub behind one function | no vendor SDK anywhere else in the codebase |
-| `answer.py` | prompt building, context ordering, refusal, citation checking | this is where grounding is enforced |
-
-## The five things worth explaining in an interview
-
-1. **Cosine similarity is a dot product — if you normalize.** Vectors are L2-normalized once
-   at index time, so search is a single matrix multiply. `NumpyStore.search` uses
-   `argpartition` for O(n) top-k instead of sorting the whole corpus.
-2. **Query and passage prefixes.** e5 models are trained with `query: ` / `passage: `
-   prefixes; bge-m3 uses none. Getting this wrong costs accuracy silently, and
-   `embed.py` handles it per model instead of leaving it to the caller.
-3. **Filters are part of retrieval quality.** Repealed acts are excluded by default —
-   otherwise the system will one day confidently cite a statute that no longer exists.
-   Language and act filters cut the search space before ranking.
-4. **Citations are verified, not trusted.** `check_citations` flags any `[n]` outside the
-   range of retrieved excerpts, and the CLI prints which excerpts were retrieved but never
-   cited. That single number tells you whether `k` is too high.
-5. **Context order is a variable, not a habit.** `reorder_sandwich` puts the top hit first
-   and the second at the end, because models attend least to the middle of a long context.
-   It's a flag (`--no-sandwich`) so Phase 3 can measure whether it actually helps here.
-
-## Knobs to record for the Phase 4 ablation table
-
-`--embedder` / `--model` · `-k` · `--max-parts-per-section` · `--no-sandwich` ·
-`--language` · `max_chars` from Phase 1 chunking.
-
-Change one at a time, and write the number down each time.
-
-## Known gaps (deliberately left for later phases)
-
-- **No evaluation yet.** Everything above is an opinion until Phase 3 measures it.
-- **No BM25 / hybrid search.** Exact terms like "ধারা ৩০২" are where dense embeddings are
-  weakest; that is the Phase 4 fix.
-- **No reranker** — Phase 4.
-- **No conversation memory**, so follow-up questions ("and the penalty for that?") won't work.
-- **`QdrantStore` is written but untested** — run it once Qdrant is up, and compare its
-  top-k against `NumpyStore` on the same queries.
-
-## Next: Phase 3 — the evaluation set
-
-Write 150–200 questions with the correct section(s) labelled, half Bangla and half English,
-including unanswerable ones. Then measure Recall@k, MRR, faithfulness and refusal accuracy.
-Until that exists, every decision in this repo is a guess.
-
----
-
-## Phase 3: Evaluation (the phase that makes the rest defensible)
-
-Everything before this is an opinion. This phase turns "I added a reranker and it feels
-better" into "recall@5 went from 0.61 to 0.78, and the paired interval excludes zero".
-
-```
-eval.jsonl (hand-written)
-      │
-      ├── eval_retrieval.py ──► results/<label>.json ──┐
-      └── eval_e2e.py ─────────► results/<label>.json ──┴──► compare_runs.py ──► ablation table
-```
-
-## Quick start
-
-```bash
-python -m unittest discover -s tests -v        # 47 tests, all offline
-
-# See the whole loop on the sample corpus, no model or API key needed:
-python scripts/build_index.py --chunks data/sample/chunks.jsonl --out data/sample/index --embedder hashing
-python scripts/eval_retrieval.py --eval data/eval/sample_eval.jsonl --chunks data/sample/chunks.jsonl \
-       --index data/sample/index --embedder hashing --label demo
-python scripts/compare_runs.py results/demo.json
-```
-
-## Building your own evaluation set (the real work — budget a week)
-
-```bash
-python scripts/make_eval_template.py --n 80 --out data/eval/eval.jsonl   # samples sections, pre-fills gold
-# ... you write the questions and reference answers ...
-python scripts/make_eval_template.py --validate data/eval/eval.jsonl     # catches unfilled rows, bad labels
-```
-
-The template gives you the section text and the gold label; you write the question a real
-person would ask and a one-line reference answer. Then add by hand the items sampling
-cannot produce: unanswerable questions, paraphrases that avoid the section's own wording,
-questions that name a section number, and code-switched questions.
-
-**Target mix** (printed by `--validate`): 150–200 questions, ~45% Bangla / ~45% English /
-~10% mixed; ~50% single-section, ~15% multi-hop, ~15% exact reference, ~10% unanswerable,
-~10% paraphrase.
-
-**Do not have a model write the questions.** A model that reads the section and writes a
-question reproduces its wording, so retrieval looks great and tells you nothing. Questions
-written by a person, from how people actually ask, are the entire value of the set.
-
-## Design decisions worth defending
-
-1. **Gold labels point at sections, not chunks** (`"1037:40548"` = `act_id:section_id`).
-   Chunk ids change every time you re-chunk; a set labelled at chunk level dies with the
-   next `--max-chars` experiment. This one choice keeps a week of labelling alive for the
-   whole project.
-2. **Duplicate sections collapse before ranking.** If three chunks of section 2 fill the
-   top 3, that counts as one retrieved section at rank 1 — otherwise a long section would
-   quietly inflate every metric.
-3. **Unanswerable questions score `NaN` on retrieval** and are excluded from those means;
-   they are measured by `refusal_correct` instead. Mixing the two hides hallucination.
-4. **`gold_retrieved` vs `gold_cited`.** The right section reaching the context and the
-   answer actually using it are different failures with different fixes: retrieval vs
-   prompting. Measuring them separately tells you which half to work on.
-5. **Every number comes with a bootstrap confidence interval**, and runs are compared with
-   a *paired* bootstrap on the same questions. On 150 questions, ±0.05 is common noise:
-   `compare_runs.py` prints "better", "worse" or "within noise" so you don't ship a
-   regression you mistook for an improvement.
-6. **Deterministic metrics first, LLM judge second.** Refusal accuracy, citation validity
-   and citation precision are exact and free — run them on every experiment. Faithfulness
-   and correctness need a judge model, cost money, and are approximate.
-7. **Judge with a different model than the one answering**, at temperature 0, and hand-check
-   about 20 verdicts. An unaudited judge is just a second machine agreeing with the first.
-
-## What to run, and when
-
-| | command | cost | when |
-|---|---|---|---|
-| Retrieval | `eval_retrieval.py --label X` | free, seconds | every experiment |
-| End-to-end, no judge | `eval_e2e.py --no-judge --label X` | one answer call per question | before shipping a prompt change |
-| Full, judged | `eval_e2e.py --judge-provider openai --label X` | 3 calls per question | on every release |
-
-`eval_retrieval.py` also prints the questions that found nothing in the top 5. **Read them.**
-That list, not the averages, is where your next improvement comes from.
-
-## The output you put in your README
-
-```
-| run | k | recall@5 | mrr | faithfulness | latency p95 |
-|---|---|---|---|---|---|
-| baseline-english-emb | 5 | 0.41 [0.33–0.49] | 0.35 | 0.82 | 180 ms |
-| bge-m3 | 5 | 0.63 [0.55–0.71] | 0.57 | 0.88 | 210 ms |
-```
-
-plus, for each row, the paired verdict against the baseline. That table is what makes an
-interviewer take the project seriously — and what lets you answer "how do you know?".
-
-## Known gaps
-
-- Retrieval scoring is binary: a section is gold or it isn't. Graded relevance (partly
-  useful sections) would be more informative and much more labelling work.
-- The judge prompts score faithfulness as a single yes/no; per-claim grading is stricter
-  and costlier.
-- No inter-annotator check. If a friend labels 20 of your questions and disagrees on five,
-  your ceiling is lower than you think — worth doing once and mentioning honestly.
-
-## Next: Phase 4 — make the numbers move
-
-Now that you can measure: multilingual embeddings vs English-only, BM25 with Bangla
-tokenization, hybrid fusion, a cross-encoder reranker. One change at a time, one
-`--label` per run, and let `compare_runs.py` say whether it was real.
-
----
-
-## Phase 4: Making the numbers move
-
-Phase 3 built the measuring stick. This phase is the set of techniques you measure,
-one at a time, each one row of the ablation table.
-
-```
-question
-  └─ expand section refs (free) ─ rewrites / HyDE (LLM, optional)
-        ├── dense  (bge-m3, top 50)   ┐
-        └── BM25   (lexical, top 50)  ├── reciprocal rank fusion
-                                      ┘
-              └── dedupe parts of a section ── cross-encoder rerank ── top 5
-```
-
-## Quick start
-
-```bash
-python -m unittest discover -s tests -v      # 74 tests, all offline
-
-# Whole sweep on the sample corpus, no downloads:
-python scripts/build_index.py --chunks data/sample/chunks.jsonl --out data/sample/index \
-       --embedder hashing --bm25
-python scripts/ablate.py --eval data/eval/sample_eval.jsonl --chunks data/sample/chunks.jsonl \
-       --index data/sample/index --embedder hashing --rerank-kind lexical -k 5
-
-# On your real corpus and question set:
-python scripts/build_index.py --bm25                  # dense + BM25 in one pass
-python scripts/ablate.py --out results/ablation.md    # the table for your README
-python scripts/ask.py --mode hybrid --expand-refs --rerank cross "ধারা ৩০২ কী বলে?"
-```
-
-`scripts/ablate.py` runs every configuration over the same questions with the same index,
-then prints the table and a paired verdict per row: **better**, **worse** or **within noise**.
-
-## What was added, and why each one exists
-
-**BM25, written out in `lexical.py` rather than imported.** Dense embeddings are weak
-exactly where legal questions are strongest: `ধারা ৩০২`, `304A`, `Form VII`, a defined
-term quoted verbatim. BM25 matches strings, so it catches those. Writing the scoring
-function by hand means you can explain the `k1`/`b` knobs and the IDF term instead of
-pointing at a library.
-
-**A Bangla-aware tokenizer.** Bangla digits are folded to ASCII, so `৩০২` and `302` are
-one token — that single line does more for Bangla exact-match questions than any model
-swap. `।` is punctuation. Suffix stripping (`ধারায়`, `ধারার` → `ধারা`) is crude for an
-agglutinative language, so it's a flag (`--bm25-stem`) you measure, not a default.
-
-**Reciprocal rank fusion (`fusion.py`).** A cosine of 0.82 and a BM25 score of 14.3 aren't
-comparable, and min-max normalising is fragile. RRF keeps only ranks:
-`Σ weight / (rrf_k + rank)`. Small `rrf_k` rewards being rank 1 somewhere; large `rrf_k`
-rewards being liked by both lists. Both are testable claims, and there's a test for each.
-
-**Cross-encoder reranking (`rerank.py`).** The embedder scores query and document
-separately; a cross-encoder reads them together and is far more accurate — and far too slow
-to run over a corpus. So: retrieve 50 candidates cheaply, rerank to 5. Usually the biggest
-single accuracy gain and the biggest latency cost; the table shows both. A dependency-free
-`lexical` reranker is included so the sweep runs offline and so you have an honest baseline
-for what the real model is worth.
-
-**Query transforms (`query.py`).** `expand_section_refs` is free and deterministic:
-"ধারা ৩০২" also searches "section 302". Multi-query rewriting and HyDE each cost an LLM
-call per question — measure them against the free trick before paying for them.
-
-**One pipeline, shared (`pipeline.py`).** `ask.py`, `eval_retrieval.py`, `eval_e2e.py` and
-`ablate.py` all build the same `SearchPipeline` from the same flags, so the configuration
-you measured is the configuration you ship.
-
-## How to run the ablation honestly
-
-1. One change per row, in the order the sweep lists them.
-2. Same questions, same index, same `k` for every row.
-3. Report the interval, not just the mean, and the paired verdict against the baseline.
-4. Report latency alongside accuracy — a reranker that adds 300 ms is a product decision.
-5. Keep the rows that lost. "Multi-query cost a call per question and was within noise, so
-   I dropped it" is a stronger interview answer than any winning number.
-
-## Expected shape of the results (verify on your data — don't quote mine)
-
-- Hybrid usually beats dense alone, and the gap is widest on `exact_ref` questions.
-- The reranker usually gives the largest single jump in recall@5 and MRR.
-- `expand_section_refs` helps `exact_ref` questions and does nothing elsewhere — which is
-  why the per-type breakdown in the evaluation output matters.
-- Bangla suffix stripping is a coin flip; it may help recall and hurt precision.
-
-If your results disagree, your data is telling you something about legal Bangla. Write that
-up — it's the most interesting thing in the project.
-
-## Known gaps
-
-- Fusion weights and `rrf_k` are set by hand. Tune them on a held-out split, not on the
-  set you report, or you're fitting the evaluation.
-- `QdrantStore` still has no BM25 equivalent; Qdrant supports sparse vectors, which would
-  let both halves run server-side.
-- The cross-encoder runs on CPU by default. On a laptop expect a few hundred ms for 50
-  candidates; batch size and candidate count are the knobs.
-- No caching: repeated questions re-embed and re-rank every time.
-
-## Next: Phase 5 and 6
-
-Phase 5 tightens generation: enforce citations, refuse when support is weak, answer in the
-question's language. Phase 6 makes retrieval agentic — the model calls `search()` itself,
-follows the cross-references already stored in `metadata["refs"]`, and decides when it has
-enough to answer.
-
----
-
-## Phase 5: Generation you can trust
-
-Retrieval can be perfect and the answer still wrong. This phase puts a contract between
-the model and the user, and checks it on every answer — deterministically, for free.
-
-```
-retrieval ──► support gate ──► answer ──► checks ──► repair once ──► user
-              (too weak?              (citations, quotes,   (only if it
-               refuse now)             language)            actually helps)
-```
-
-## The four failures, and what catches each
-
-| Failure | Check | Why it matters here |
-|---|---|---|
-| Answering from a context that never had the answer | `support_gate` — refuse before calling the model | cheapest and safest refusal there is |
-| Sentences no excerpt supports | `citation_coverage` — every factual sentence needs a `[n]` | "cites its sources" must mean every claim, not the first one |
-| Invented quotations | `quote_fidelity` — quoted spans must appear verbatim in a **cited** excerpt | a fabricated "operative wording" is indistinguishable from the real thing |
-| Bangla question answered in English | `language_match` | the most common complaint about bilingual assistants |
-
-When a check fails, the system re-prompts **once** with the specific problem ("these
-sentences carry no citation", "this quotation is not in any excerpt") and keeps the retry
-only if it genuinely fixed something. Failures that survive are reported, never hidden.
-
-## Quick start
-
-```bash
-python -m unittest discover -s tests -v       # 99 tests, all offline
-
-# Calibrate the abstention threshold on your own evaluation set (no LLM calls):
-python scripts/calibrate_guard.py --mode hybrid --expand-refs -k 5
-
-python scripts/ask.py --mode hybrid --expand-refs --min-score 0.028 "ধারা ৩০২ কী বলে?"
-python scripts/ask.py --interactive           # follow-up questions work now
-python scripts/eval_e2e.py --label guarded --min-score 0.028 --no-judge
-```
-
-## Why `--min-score` must be calibrated, not copied
-
-Retrieval scores are not on a shared scale: cosine similarity sits near 0.5, BM25 in the
-tens, fused RRF scores near 0.03. A threshold from a tutorial is meaningless for your
-pipeline. `calibrate_guard.py` sweeps thresholds over your evaluation set and reports, for
-each one, how many answerable questions you would still attempt, how many keep a gold
-section, and how many unanswerable ones you would correctly refuse.
-
-Refusing is not a free safety win. Every threshold trades hallucinations against questions
-you could have answered, and the table makes that trade explicit instead of accidental.
-
-## Follow-up questions (`chat.py`)
-
-"ধারা ৩০২ কী বলে?" then "আর শাস্তি?" — the second question retrieves nothing on its own.
-The fix is **not** to concatenate the history into the search query; that drags in words
-that pull retrieval off topic. Instead the follow-up is rewritten into a standalone
-question *for retrieval only*, while the answer prompt still sees what the user actually
-asked. A rewrite that comes back empty or absurdly long is discarded rather than trusted.
-
-## New metrics in the evaluation output
-
-`citation_coverage`, `quote_fidelity`, `language_match`, `clean_first_pass` (passed every
-check without a repair), `guard_repaired`, `abstained`. `clean_first_pass` is the one to
-watch over time: repairs are a safety net, and a net catching more each week means the
-prompt or the retrieval underneath it is getting worse.
-
-## Design decisions worth defending
-
-1. **Deterministic checks enforce the contract; the LLM judge grades quality.** Never mix
-   them — one is free and exact, the other costs money and is approximate.
-2. **Quotes are checked against the *cited* excerpts**, not all of them. A quotation lifted
-   from an excerpt the answer did not cite is still a miscitation.
-3. **One repair attempt, kept only if it helped.** Unbounded self-correction loops burn
-   tokens and can talk themselves out of a correct answer.
-4. **Abstention happens before generation** when retrieval is weak — the model never sees a
-   context it cannot answer from, so it cannot be tempted by it.
-5. **Failures are surfaced, not swallowed.** The CLI prints which sentences were uncited and
-   which quotes were fabricated. A system that hides its own check failures is worse than
-   one without checks, because now you trust it.
-
-## Known gaps
-
-- Sentence splitting is regex-based; abbreviations and nested quotes can fool it.
-- Quote checking is exact-match after whitespace normalisation, so a legitimately
-  reformatted quote (an ellipsis, a dropped footnote marker) can be flagged. Deliberately
-  strict: a false alarm costs a re-prompt, a missed fabrication costs your credibility.
-- `citation_coverage` counts sentences, not claims. Two claims in one sentence with one
-  citation both pass.
-- Follow-up rewriting costs an LLM call on short questions and is skipped on long ones —
-  a heuristic, and worth measuring on a conversational evaluation set you don't have yet.
-
-## Next: Phase 6
-
-Agentic retrieval: the model calls `search()` itself, decides when it has enough, and
-follows the cross-references already sitting in `metadata["refs"]` — so "as defined in
-section 2" gets resolved instead of ignored.
-
----
-
-## Phase 6: Agentic retrieval
-
-Phases 2–5 retrieve once and answer. That breaks on two kinds of question:
-
-- **Multi-hop**: "ধারা ৩০২ এর শাস্তি কী এবং ৩০৪ক এর সাথে পার্থক্য কী?" needs two sections.
-- **Cross-references**: a section says "as defined in section 2", and the definition was
-  never in the retrieved context at all.
-
-So the model gets to search for itself, repeatedly, and decides when it has enough.
-
-```
-THINK / ACTION ──► tool ──► evidence ──► THINK / ACTION ──► … ──► ANSWER ──► guardrails
-                                    ^ bounded by max_steps and the stop rules
-```
-
-## Three tools
-
-| Tool | What it does | Why it exists |
-|---|---|---|
-| `search(query, k, language, act_id)` | the Phase 4 hybrid pipeline | find provisions by meaning or wording |
-| `get_section(act_id, section)` | exact lookup by number | the question names a section; don't make the model search for it |
-| `follow_refs(excerpt, limit)` | resolves `metadata["refs"]` | "as defined in section 2" — the cross-references Phase 1 already extracted |
-
-`follow_refs` is why the ingestion phase bothered to pull cross-references out of the text.
-Work you do early pays off three phases later, which is worth saying out loud in an interview.
-
-## Quick start
-
-```bash
-python -m unittest discover -s tests -v       # 118 tests, all offline
-
-python scripts/ask.py --agent --show-trace --mode hybrid --expand-refs \
-       "ধারা ৩০২ এবং ৩০৪ক এর পার্থক্য কী?"
-
-# Does the agent actually beat the single-shot pipeline? Measure it:
-python scripts/eval_e2e.py --label single --no-judge
-python scripts/eval_e2e.py --label agent --agent --no-judge
-python scripts/compare_runs.py results/single.json results/agent.json --baseline single
-```
-
-## The part that matters: stopping
-
-Anyone can write a loop that calls a search tool. What makes an agent shippable is that it
-always stops, and always with something:
-
-| Rule | Why |
-|---|---|
-| hard `max_steps` cap | an unbounded loop is an unbounded bill |
-| repeated identical action → stop | the classic agent failure: searching the same thing forever |
-| two steps with no new evidence → stop | it is not converging; answer with what it has |
-| two malformed replies → stop | small models drift out of the format and do not recover |
-| out of steps → one forced answer from the evidence gathered | never return nothing after paying for five calls |
-| final answer runs Phase 5 guardrails | citations, quotes, language — an agent hallucinates like anything else |
-
-Each of those has a test with a scripted model, because the control flow is the product.
-
-## Stable citation numbering
-
-Every tool call writes into one `EvidenceBook` that numbers each chunk once and never
-reuses a number. Without it, `[2]` would mean a different excerpt at every step and the
-final citations would be nonsense. This is the bug people hit first when they bolt an
-agent onto a working RAG system.
-
-## Honest expectations
-
-- Agentic retrieval costs 3–6 LLM calls per question instead of 1. On simple questions it
-  usually matches the single-shot pipeline; it earns its keep on multi-hop and
-  cross-reference questions. Your `by_type` breakdown will show exactly that, which is a
-  far better interview answer than "I added an agent".
-- It is also slower and more variable. Report median and p95 latency alongside accuracy.
-- This loop uses a text protocol (`THINK` / `ACTION` / `ANSWER`) rather than a vendor's
-  tool-calling API, so it runs on any model in `llm.py` unchanged. In production you would
-  use native tool calling — the control flow, budget and stop rules stay the same, and
-  those are the parts worth defending.
-
-## Known gaps
-
-- No parallel tool calls; each step is sequential.
-- The agent cannot re-plan after answering (no self-critique pass). Deliberate — one
-  bounded repair is easier to reason about than a critique loop that can talk itself out
-  of a correct answer.
-- `follow_refs` only follows references within the same act. Cross-act references
-  ("as defined in the Companies Act") need the act-level index the parser already collects.
-
----
-
-## Where the project stands
-
-| Phase | What it gives you | Interview line |
-|---|---|---|
-| 1 Ingestion | structure-aware chunks with metadata | "I chunk by legal section, not token count" |
-| 2 Baseline | embed → index → retrieve → cite | "cosine is a dot product if you normalise" |
-| 3 Evaluation | labelled set, CIs, paired comparison | "a 5-point gain on 150 questions is usually noise" |
-| 4 Retrieval | BM25 + hybrid + rerank + expansion | "here is the ablation table, one change per row" |
-| 5 Generation | abstention, citation and quote checks | "a fabricated quote is the worst legal failure" |
-| 6 Agentic | multi-step search, cross-references | "the hard part is stopping, not calling tools" |
-
-**What's left (Phase 7, production):** FastAPI with streaming, a small frontend, caching,
-tracing, Docker, a deploy, and the evaluation suite running in CI so a pull request that
-drops recall@5 fails the build. That last one is what turns this from a project into
-engineering.
-
-**Before you show it to anyone**, the README needs: the architecture diagram, the ablation
-table near the top, a failure-analysis section naming what still breaks, and a demo link.
-Interviewers read the numbers and the honesty; the code is what they check afterwards.
-
----
-
-## Phase 7: Production
-
-The difference between a notebook and a system: someone else can run it, watch it, and
-break it without you noticing.
-
-### What was added
-
-**HTTP API + streaming UI (`src/service/`).** `/ask` returns a grounded answer with its
-sources and guardrail report; `/ask/stream` sends the same as server-sent events so the
-first words appear in about a second instead of after ten; `/search` runs retrieval only,
-which costs nothing and is the endpoint to demo when your API budget is out. The UI is one
-static file, bilingual, dark-mode aware, and shows refusals, repairs and failed checks
-rather than hiding them.
-
-**Caching that is keyed correctly.** Answers are cached by question **and** every setting
-that changes the answer — index, mode, k, language, abstention threshold. Keying a RAG
-cache by the question alone is how you serve yesterday's pipeline for a week without
-noticing.
-
-**Rate limiting.** A token bucket per client: short bursts allowed, sustained rate capped.
-An LLM-backed endpoint left open is a way to lose money quickly.
-
-**Metrics and structured logs.** Every request gets an id, a latency measurement and a JSON
-log line. `/metrics` exposes counters and p50/p95 in Prometheus text format, including
-`answers_total{outcome="refused"}`, `repairs_total` and `guardrail_failures_total` — the
-three numbers that tell you the system is drifting before users do.
-
-**Docker + compose.** Multi-stage build, non-root user, healthcheck, no data in the image,
-optional Qdrant profile for when the corpus outgrows brute-force search.
-
-**CI with a quality gate (`scripts/ci_eval_gate.py`).** The tests prove the code runs; the
-gate proves the system still works. It re-runs retrieval on the evaluation set and fails
-the build if recall@5 drops more than a tolerance below the committed baseline, with a
-paired bootstrap so noise does not fail your build and a real regression does.
-
-### Design decisions worth defending
-
-1. **Components are injected, not imported.** `create_app(config, pipeline, llm, ...)`
-   means the whole service is tested with a fake model and a four-document corpus — no
-   GPU, no API key, no network. A service you can only test by deploying it is a service
-   nobody tests.
-2. **The agent does not stream.** It makes several calls with nothing to show in between,
-   so the UI uses the plain endpoint and says what it is doing. Faking a stream to look
-   busy is a lie about what the system is doing.
-3. **Guardrail results are part of the API response**, not internal state. Clients can
-   show "this answer needed a correction" — and you can alert on it.
-4. **Latency is reported next to accuracy everywhere.** A reranker that adds 300 ms is a
-   product decision, not a free win.
-5. **The quality gate uses a paired test.** A plain threshold either blocks noise or misses
-   real regressions; pairing on the same questions distinguishes them.
-
-### Known gaps
-
-- The cache and rate limiter are in-process, so they reset on restart and do not span
-  replicas. Redis is the swap, behind the same two interfaces.
-- No authentication: this is a public read-only service by design. Anything with user
-  accounts needs auth before it goes anywhere near the internet.
-- `/ask` has no timeout on a slow model; a production deployment should cap it and return
-  504 rather than holding the connection.
-- No evaluation of the streaming path against the non-streaming one — they share the
-  guardrails but not the code path.
-
----
-
-## Phase 8: The improvement pass
-
-Everything above was the first working version. This pass went back through it
-with a list of defects and improvements (`IMPROVEMENTS.md`) and implemented what
-could be implemented and measured offline. `IMPLEMENTED.md` is the ledger: every
-item, its status, and — for the ones that were skipped — the honest reason.
-
-**Defects fixed.** Blocking work moved off the event loop into a threadpool (the
-service previously serialised concurrent requests); the answer cache is now keyed
-by an index *fingerprint*, so rebuilding invalidates it; LLM calls have timeouts,
-bounded retries with jitter, and a typed failure that the service degrades on;
-the streaming and non-streaming answer paths are one implementation; the
-cross-package `sys.path` hack is gone and the project is an installable package;
-`/metrics` emits proper HELP/TYPE; the config object, not an argparse namespace,
-is the pipeline's interface.
-
-**Retrieval.** Romanised Bangla ("dhara 302 e ki ache") is transliterated and
-searched alongside the original; a legal synonym lexicon bridges উচ্ছেদ ↔
-eviction; queries are classified (exact reference / comparative / conceptual) and
-fused with weights chosen per class; MMR trades a little relevance for coverage;
-in-force boosting pushes amended and repealed text down; parent–child retrieval
-answers from the whole section; int8 quantisation with exact rescoring cuts index
-memory 4×; `scripts/tune.py` grid-searches the weights on a tuning split and
-refuses to run on your reported set; `scripts/sweep_chunking.py` measures chunk
-size end to end; `scripts/contextualize.py` implements contextual retrieval.
-
-**Generation.** Per-claim entailment replaces "does the sentence have a citation"
-with "does the cited text support it". Answers carry a confidence score built
-from retrieval margin, citation agreement and grounding — with a warning in the
-code that it must be calibrated before it is shown. Advice-seeking questions get
-a legal-aid notice, off-topic questions are refused without a model call, and
-user text is quoted as content so that "ignore the excerpts" is data, not an
-instruction. Prompts are versioned and the version is recorded in every result.
-
-**Evaluation.** Graded relevance and graded nDCG; a failure taxonomy that assigns
-each failure to retrieval, ranking, citation or reasoning (`scripts/failure_report.py`);
-judge calibration against your own labels with Cohen's kappa
-(`scripts/calibrate_judge.py`); a power analysis that says how big a difference
-your set can detect (`scripts/power_analysis.py`); `--repeats` for variance on
-LLM-dependent metrics; an adversarial set (injection, romanised input, typos,
-non-existent sections) wired into CI.
-
-**Agent.** Parallel tool calls in one step; `compare_sections` and `list_acts`
-tools; cross-act reference following via `metadata["act_refs"]`; a native
-tool-calling adapter for Anthropic and OpenAI shapes; automatic routing so only
-multi-hop questions pay for the agent.
-
-**Service.** Graceful degradation to retrieval-only when the model is down; API
-keys with per-key quotas; Redis-backed cache and rate limiting behind the same
-interfaces (in-process by default, falling back automatically); span tracing;
-query analytics and feedback capture that become tomorrow's evaluation set;
-answer permalinks; security headers; cost estimation and a monthly projection in
-`/stats`; a UI that shows confidence, the agent's trace, and thumbs up/down.
-
-**Engineering.** Installable package with a `bdrag` entry point, ruff clean,
-mypy configured, ADRs for the six decisions worth defending, a data card, a blog
-draft, a dependency-free load test, and CI that runs lint, tests with a coverage
-floor, the retrieval quality gate and the adversarial suite.
-
-### Measured here, on the sample corpus
-
-The service handles **~350 req/s on `/search` at concurrency 8, p95 36 ms** in
-this container — with the hashing embedder and a 7-chunk corpus. Treat it as a
-smoke test of the plumbing, not a benchmark: real numbers depend on bge-m3 on
-your hardware and your corpus size. `make loadtest` produces yours.
-
-### Still not done, and why
-
-- **Qdrant is still unrun** — no server available in the build environment. The
-  code is there; the first thing to do with a running Qdrant is compare its
-  top-k against `NumpyStore` and put the difference in the README.
-- **The NLI entailer is implemented but untested against a real model** (no
-  model download available here); the lexical entailer is what the tests cover.
-- **Point-in-time law, schedules, OCR, case law** — all need the real corpus in
-  front of you first.
-- **Fine-tuning the embedder or reranker** needs your labelled data and a GPU.
-- **A live deployment and a demo video** need an account and a microphone.
+[`docs/BUILD_NOTES.md`](docs/BUILD_NOTES.md) is the build log, one phase at a time
+(ingestion, baseline RAG, evaluation, retrieval, generation, agent, production,
+improvement pass): what was added, why, and what was deliberately left out.

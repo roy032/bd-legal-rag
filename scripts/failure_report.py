@@ -65,13 +65,14 @@ def main() -> None:
         }
 
     report = diagnose(items, per_question, corpus_keys)
+    if args.out:
+        Path(args.out).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({k: v for k, v in report.items() if k != "failures"},
                      ensure_ascii=False, indent=2))
     print("\nFailures (read these):")
     for row in report["failures"][:25]:
         print(f"  [{row['stage']:<15}] {row['id']} {row['question'][:70]}")
     if args.out:
-        Path(args.out).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"\nwrote {args.out}")
 
 

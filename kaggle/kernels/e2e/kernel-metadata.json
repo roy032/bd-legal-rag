@@ -1,0 +1,19 @@
+{
+ "id": "jayantaroy2/bdrag-e2e",
+ "title": "bdrag-e2e",
+ "code_file": "e2e_cell.py",
+ "language": "python",
+ "kernel_type": "script",
+ "is_private": true,
+ "enable_gpu": true,
+ "enable_tpu": false,
+ "enable_internet": true,
+ "dataset_sources": [
+  "jayantaroy2/bdrag-bundle"
+ ],
+ "kernel_sources": [
+  "jayantaroy2/bdrag-build-index"
+ ],
+ "competition_sources": [],
+ "model_sources": []
+}

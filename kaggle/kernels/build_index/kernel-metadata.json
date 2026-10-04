@@ -1,0 +1,17 @@
+{
+ "id": "jayantaroy2/bdrag-build-index",
+ "title": "bdrag-build-index",
+ "code_file": "build_index_cell.py",
+ "language": "python",
+ "kernel_type": "script",
+ "is_private": true,
+ "enable_gpu": true,
+ "enable_tpu": false,
+ "enable_internet": true,
+ "dataset_sources": [
+  "jayantaroy2/bdrag-bundle"
+ ],
+ "kernel_sources": [],
+ "competition_sources": [],
+ "model_sources": []
+}

@@ -1,0 +1,25 @@
+# config: --mode dense --expand-refs --synonyms --transliterate --resolve-refs --boost-in-force --max-parts-per-section 2
+86 answerable, 10 unanswerable · top-1 score range 0.0321 … 0.7670
+
+ min_score  answer_rate  gold_kept  correct_abstain   score
+    0.0321         1.00       0.86             0.00   0.430
+    0.0989         0.94       0.83             0.00   0.413
+    0.1657         0.94       0.83             0.00   0.413
+    0.2325         0.94       0.83             0.00   0.413
+    0.2993         0.94       0.83             0.00   0.413
+    0.3661         0.94       0.83             0.00   0.413
+    0.4329         0.94       0.83             0.00   0.413
+    0.4997         0.94       0.83             0.10   0.463
+    0.5666         0.92       0.80             0.40   0.601
+    0.6334         0.69       0.62             1.00   0.808
+    0.7002         0.17       0.17             1.00   0.587
+    0.7670         0.01       0.01             1.00   0.506
+
+best by this crude score: --min-score 0.6334
+Check it against the questions it would newly refuse before you ship it — refusing a question you could answer is a real cost, not a free safety win.
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+
+Loading weights:   0%|          | 0/391 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 391/391 [00:00<00:00, 8630.75it/s]
+C:\Users\Roy\Desktop\bd-legal-rag\src\rag\embed.py:61: FutureWarning: The `get_sentence_embedding_dimension` method has been renamed to `get_embedding_dimension`.
+  self.dim = self.model.get_sentence_embedding_dimension()
