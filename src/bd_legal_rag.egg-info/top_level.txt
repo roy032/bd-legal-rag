@@ -1,4 +1,0 @@
-evalkit
-ingest
-rag
-service
