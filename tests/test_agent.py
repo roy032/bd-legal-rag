@@ -272,3 +272,30 @@ class TestNamedSections(unittest.TestCase):
         out = tools.get_section(1, "304")
         self.assertIn("using act_id 2", out)
         self.assertIn("culpable homicide", out)
+
+
+class TestLooseFormat(unittest.TestCase):
+    """qwen2.5:7b on the live index: both questions ended "malformed_twice"."""
+
+    def setUp(self):
+        self.pipeline, self.records = build()
+
+    def run_with(self, *replies):
+        agent = LegalAgent(self.pipeline, self.records, ScriptedLLM(*replies), AgentConfig(seed=True))
+        return agent.run("হত্যার শাস্তি কী?")
+
+    def test_decorated_markers_are_understood(self):
+        ans = self.run_with('THINK: need more\n**Action:** ```json\n{"tool": "search", "args": {"query": "হত্যা"}}\n```',
+                            "**Answer:** হত্যার শাস্তি মৃত্যুদণ্ড [1]।")
+        self.assertEqual(ans.checks["stop_reason"], "answered")
+        self.assertEqual(ans.checks["trace"][1]["type"], "tool")
+
+    def test_a_cited_answer_without_marker_is_accepted(self):
+        ans = self.run_with("হত্যার শাস্তি মৃত্যুদণ্ড অথবা যাবজ্জীবন কারাদণ্ড [1]।")
+        self.assertEqual(ans.checks["stop_reason"], "answered")
+        self.assertFalse(ans.refused)
+
+    def test_answer_word_inside_think_is_not_an_answer(self):
+        ans = self.run_with('THINK: to answer: I need the section\nACTION: {"tool": "search", "args": {"query": "হত্যা"}}',
+                            "ANSWER: হত্যার শাস্তি মৃত্যুদণ্ড [1]।")
+        self.assertEqual(ans.checks["trace"][1]["type"], "tool")

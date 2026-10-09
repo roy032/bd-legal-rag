@@ -70,8 +70,10 @@ Rules:
   ANSWER: NOT_FOUND: <what is missing>
 - You have at most {max_steps} actions. Spend them; do not stall."""
 
-ACTION_RE = re.compile(r"ACTION:\s*([\[{].*)", re.S)   # one object or a list of them
-ANSWER_RE = re.compile(r"ANSWER:\s*(.*)", re.S)
+# Small local models decorate the markers ("**Answer:**", "Action -"), so match loosely.
+ACTION_RE = re.compile(r"^[\s*#]*ACTION\**\s*[:\-]\**\s*(?:```(?:json)?\s*)?([\[{].*)", re.S | re.I | re.M)
+ANSWER_RE = re.compile(r"^[\s*#]*(?:FINAL\s+)?ANSWER\**\s*[:\-]\**\s*(.*)", re.S | re.I | re.M)
+CITED = re.compile(r"\[\d+\]")
 
 
 @dataclass
@@ -154,13 +156,20 @@ class LegalAgent:
             calls += 1
 
             answer_m = ANSWER_RE.search(reply)
-            if answer_m and "ACTION:" not in reply.split("ANSWER:")[0][-200:]:
+            if answer_m and not ACTION_RE.search(reply[:answer_m.start()]):
                 final = answer_m.group(1).strip()
                 stop_reason = "answered"
                 trace.append({"step": step, "type": "answer"})
                 break
 
             actions = _parse_actions(reply)[: cfg.max_parallel]
+            if not actions and len(CITED.findall(reply)) >= 1 and len(reply) > 40 \
+                    and "THINK" not in reply.upper()[:20]:
+                # No markers, but a cited answer: small models often just answer.
+                final = reply
+                stop_reason = "answered"
+                trace.append({"step": step, "type": "answer", "unformatted": True})
+                break
             if not actions:
                 trace.append({"step": step, "type": "malformed", "reply": reply[:200]})
                 transcript.append("(your last reply had no valid ACTION or ANSWER)")

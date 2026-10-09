@@ -55,7 +55,7 @@ An agent mode sits alongside the single-shot path: the model calls `search`,
 
 ```bash
 pip install -e ".[serve]"     # or: make install
-make test                     # 253 tests, all offline — no API key, no model download
+make test                     # 256 tests, all offline — no API key, no model download
 make demo                     # full pipeline + ablation on the bundled sample corpus
 make serve                    # API + UI on :8000
 ```
