@@ -30,8 +30,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 import uuid
+from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -124,6 +126,7 @@ class ServiceConfig:
     cors_origins: list[str] = field(default_factory=lambda: ["*"])
     trust_proxy: bool = False
     verify_live: bool = False        # re-check cited sections against bdlaws (rag/verify.py)
+    preload: bool = False            # load index and models at startup (from_env turns it on)
     cache_dir: str = "data/raw"        # honour X-Forwarded-For (only behind your own proxy)
 
     @classmethod
@@ -170,6 +173,7 @@ class ServiceConfig:
             cors_origins=[o.strip() for o in _env_str("BDRAG_CORS", "*").split(",") if o.strip()],
             trust_proxy=_env_bool("BDRAG_TRUST_PROXY", False),
             verify_live=_env_bool("BDRAG_VERIFY_LIVE", False),
+            preload=_env_bool("BDRAG_PRELOAD", True),
             cache_dir=_env_str("BDRAG_CACHE", "data/raw"),
         )
 
@@ -247,10 +251,20 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
                    "records": records, "agent": None, "ready": pipeline is not None,
                    "fingerprint": index_fingerprint(cfg.index)}
 
+    build_lock = threading.Lock()
+
     def build() -> None:
-        """Load the index and models once, lazily, so startup failures are visible."""
+        """Load the index and models exactly once. Concurrent first requests wait for
+        the one load instead of each loading their own copy of the embedding model
+        (four parallel loads of bge-m3 exhaust a laptop's memory)."""
         if state["ready"]:
             return
+        with build_lock:
+            if state["ready"]:
+                return
+            _build()
+
+    def _build() -> None:
         from rag.embed import embedder_for
         from rag.llm import get_llm, get_stream_llm
         from rag.pipeline import build_pipeline, load_records
@@ -279,7 +293,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         if state["agent"] is None:
             state["agent"] = LegalAgent(state["pipeline"], state["records"] or [], state["llm"],
                                         AgentConfig(max_steps=cfg.max_steps, per_call_k=cfg.k,
-                                                    guard=guard()))
+                                                    guard=guard(), seed=True))
         return state["agent"]
 
     def remember(answer_id: str, out: dict, ans, client, use_agent: bool) -> None:
@@ -345,6 +359,20 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         }, status_code=503)
 
     # ----------------------------------------------------------- endpoints
+    def llm_reachable() -> bool | None:
+        """For a local Ollama, whether it answers at all (None: not checked)."""
+        if (cfg.provider or "").lower() != "ollama":
+            return None
+        import urllib.request
+        host = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+        if not host.startswith("http"):
+            host = "http://" + host
+        try:
+            with urllib.request.urlopen(f"{host}/api/version", timeout=2):
+                return True
+        except OSError:
+            return False
+
     async def health(request: Request):
         try:
             await run_in_threadpool(build)
@@ -355,7 +383,10 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
                              "chunks": len(store) if store else None,
                              "embedder": getattr(store, "embedder_name", None),
                              "index_fingerprint": state["fingerprint"],
-                             "agent_enabled": cfg.agent_enabled})
+                             "agent_enabled": cfg.agent_enabled,
+                             "llm": cfg.provider or "none",
+                             "llm_model": cfg.llm_model or None,
+                             "llm_reachable": await run_in_threadpool(llm_reachable)})
 
     async def stats(request: Request):
         await run_in_threadpool(build)
@@ -479,7 +510,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
             trace.finish(endpoint="ask", degraded=True)
             return JSONResponse({
                 "question": question, "answer": None, "degraded": True,
-                "error": f"the answering model is unavailable ({type(e).__name__})",
+                "error": f"the answering model is unavailable ({e})",
                 "sources": [{"n": n, "citation": h.citation, "url": h.metadata.get("url"),
                              "text": h.body[:800]} for n, h in enumerate(hits, 1)],
                 "disclaimer": "Informational only — not legal advice.",
@@ -538,6 +569,20 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
                         yield sse("final", out)
                     else:
                         yield sse(kind, {k2: v for k2, v in item.items() if k2 != "type"})
+            except LLMError as e:
+                # Same degradation as /ask: the model failed, retrieval did not.
+                log.warning("answering model failed during stream: %s", e)
+                metrics.inc("degraded_total")
+                try:
+                    hits = state["pipeline"].search(question, k=k)
+                except Exception:
+                    hits = []
+                yield sse("final", {
+                    "question": question, "answer": None, "degraded": True,
+                    "error": f"the answering model is unavailable ({e})",
+                    "sources": [{"n": n, "citation": h.citation, "url": h.metadata.get("url"),
+                                 "text": h.body[:800]} for n, h in enumerate(hits, 1)],
+                    "disclaimer": "Informational only — not legal advice."})
             except Exception as e:            # a dropped stream must not hang the client
                 log.exception("stream failed")
                 yield sse("error", {"error": f"{type(e).__name__}: {e}"})
@@ -591,9 +636,25 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         Middleware(CORSMiddleware, allow_origins=cfg.cors_origins, allow_methods=["*"],
                    allow_headers=["*"]),
     ]
-    app = Starlette(routes=routes, middleware=middleware)
+    def preload() -> None:
+        """Warm the index and model in the background at startup, so the first
+        question is not the one that pays for loading them."""
+        try:
+            build()
+            log.info("index and models loaded")
+        except Exception:
+            log.exception("preload failed; the first request will retry")
+
+    @asynccontextmanager
+    async def lifespan(_app):
+        if cfg.preload and not state["ready"]:
+            threading.Thread(target=preload, daemon=True).start()
+        yield
+
+    app = Starlette(routes=routes, middleware=middleware, lifespan=lifespan)
     app.state.config, app.state.metrics, app.state.cache = cfg, metrics, answers
     app.state.components, app.state.recent = state, recent
+    app.state.build = build
     return app
 
 

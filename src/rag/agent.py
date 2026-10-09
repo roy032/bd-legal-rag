@@ -81,6 +81,9 @@ class AgentConfig:
     max_parallel: int = 3           # tool calls run together in one step
     guard: GuardConfig = field(default_factory=GuardConfig)
     verbose: bool = False
+    # Start from the single-shot retrieval before the first step. Off by default so
+    # the loop can be studied in isolation; the service turns it on.
+    seed: bool = False
 
 
 def _parse_action(text: str) -> tuple[str | None, dict]:
@@ -123,6 +126,11 @@ class LegalAgent:
 
         trace: list[dict] = []
         transcript: list[str] = []
+        # Start from the single-shot retrieval (which already resolves "দণ্ডবিধির ধারা ৩০২"
+        # to the section) so the model sees real act_ids instead of guessing them.
+        if cfg.seed:
+            seeded = book.add(self.pipeline.search(question, k=cfg.per_call_k))
+            trace.append({"step": 0, "type": "seed", "new_excerpts": len(seeded)})
         seen_actions: set[str] = set()
         stalled = 0
         calls = 0
@@ -170,7 +178,9 @@ class LegalAgent:
                 with ThreadPoolExecutor(max_workers=cfg.max_parallel) as pool:
                     results = list(pool.map(lambda c: tools.run(c["tool"], c["args"]), actions))
             gained = len(book) - before
-            stalled = stalled + 1 if gained == 0 else 0
+            # list_acts only looks up an act_id; it never adds excerpts, so it is not a stall.
+            if not all(c["tool"] == "list_acts" for c in actions):
+                stalled = stalled + 1 if gained == 0 else 0
             trace.append({"step": step, "type": "tool", "calls": actions,
                           "tool": actions[0]["tool"], "args": actions[0]["args"],
                           "parallel": len(actions), "new_excerpts": gained})

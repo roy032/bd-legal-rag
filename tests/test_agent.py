@@ -174,6 +174,19 @@ class TestAgentLoop(unittest.TestCase):
         self.assertEqual(ans.checks["stop_reason"], "malformed_twice")
         self.assertTrue(ans.refused)                # nothing retrieved -> refuses
 
+    def test_seed_gives_real_act_ids_and_list_acts_is_not_a_stall(self):
+        """A wrong act_id guess plus an act lookup used to end the run with nothing."""
+        llm = ScriptedLLM(
+            'ACTION: {"tool": "get_section", "args": {"act_id": 999, "section": "302"}}',
+            'ACTION: {"tool": "list_acts", "args": {"query": "দণ্ডবিধি"}}',
+            "ANSWER: হত্যার শাস্তি মৃত্যুদণ্ড [1]।",
+        )
+        ans = self.agent(llm, seed=True).run("হত্যার শাস্তি কী?")
+        self.assertEqual(ans.checks["stop_reason"], "answered")
+        self.assertEqual(ans.checks["trace"][0]["type"], "seed")
+        self.assertTrue(ans.hits)
+        self.assertFalse(ans.refused)
+
     def test_stalling_tools_stop_the_loop(self):
         llm = ScriptedLLM(
             'ACTION: {"tool": "get_section", "args": {"act_id": 1, "section": "999"}}',

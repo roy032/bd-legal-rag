@@ -9,7 +9,7 @@ from ingest.textutils import bn_to_ascii_digits, detect_lang
 
 from .confidence import confidence
 from .guardrails import GuardConfig, repair_instruction, run_checks, support_gate
-from .llm import LLM
+from .llm import LLM, LLMError
 from .prompts import ACTIVE_ANSWER_SYSTEM
 from .scope import OFF_TOPIC_REPLY, apply_notices, classify_request, wrap_untrusted
 from .store import Hit
@@ -45,6 +45,11 @@ def normalize_answer(text: str) -> str:
     m = _REFUSAL_HEAD.match(text)
     if m:
         text = f"{REFUSAL_MARK}: " + text[m.end():].strip()
+    # Small models sometimes open with the citation ("[1] Whoever commits theft ...");
+    # a citation belongs after the claim, and the sentence already ends with one.
+    lead = re.match(r"^(\[\d+\])\s+(?=\S)", text)
+    if lead and re.search(r"\[\d+\][.।]?\s*$", text):
+        text = text[lead.end():]
     return text
 
 
@@ -190,6 +195,10 @@ def answer_question_stream(question: str, retriever, stream_llm, k: int = 5,
         pieces.append(piece)
         yield {"type": "token", "text": piece}
     text = normalize_answer("".join(pieces))
+    if not text.strip():
+        # Nothing to check and nothing to show: let the caller degrade to the
+        # retrieved provisions instead of presenting a blank answer as a success.
+        raise LLMError("the answering model returned an empty response")
 
     refused = text.startswith(REFUSAL_MARK)
     checks = {} if refused else run_checks(question, text, ordered, guard)

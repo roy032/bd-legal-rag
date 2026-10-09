@@ -188,6 +188,36 @@ class TestEndpoints(unittest.TestCase):
                            .split("data: ")[1])
         self.assertIn("মৃত্যুদণ্ড", final["answer"])
 
+    def test_empty_model_answer_degrades_and_is_not_cached(self):
+        """A blank completion (e.g. Ollama out of memory) is a failure, not an answer."""
+        pipeline, _, _ = fake_components()
+        app = create_app(ServiceConfig(rate_per_min=6000, burst=100), pipeline=pipeline,
+                         llm=lambda s, p: "   ", stream_llm=lambda s, p: iter([""]), records=CORPUS)
+        c = TestClient(app)
+        r = c.post("/ask", json={"question": "হত্যার শাস্তি কী?"})
+        self.assertEqual(r.status_code, 503)
+        self.assertTrue(r.json()["degraded"])
+        self.assertTrue(r.json()["sources"])
+        self.assertEqual(c.post("/ask", json={"question": "হত্যার শাস্তি কী?"}).status_code, 503)
+
+    def test_stream_degrades_to_sources_when_the_model_fails(self):
+        from rag.llm import LLMError
+
+        def broken(system, prompt):
+            raise LLMError("Ollama error: model requires more system memory")
+            yield ""                                      # pragma: no cover - makes it a generator
+
+        pipeline, llm, _ = fake_components()
+        app = create_app(ServiceConfig(rate_per_min=6000, burst=100), pipeline=pipeline,
+                         llm=llm, stream_llm=broken, records=CORPUS)
+        r = TestClient(app).post("/ask/stream", json={"question": "হত্যার শাস্তি কী?"})
+        blocks = [b for b in r.text.split("\n\n") if b.strip()]
+        self.assertTrue(blocks[-1].startswith("event: final"))
+        final = json.loads(blocks[-1].split("data: ", 1)[1])
+        self.assertTrue(final["degraded"])
+        self.assertIn("memory", final["error"])
+        self.assertTrue(final["sources"])
+
     def test_abstains_when_min_score_is_high(self):
         body = self.client(min_score=0.99).post("/ask", json={"question": "হত্যার শাস্তি কী?"}).json()
         self.assertTrue(body["refused"] and body["abstained"])

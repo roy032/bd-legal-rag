@@ -91,6 +91,12 @@ class TestAnswerNormalisation(unittest.TestCase):
         self.assertEqual(normalize_answer("দণ্ড হবে [১]। আরও [১, ৩]।"), "দণ্ড হবে [1]। আরও [1][3]।")
         self.assertEqual(normalize_answer("See [2–4]."), "See [2][3][4].")
 
+    def test_leading_citation_is_dropped_when_the_claim_is_cited(self):
+        from rag.answer import normalize_answer
+        self.assertEqual(normalize_answer("[1] Whoever commits theft shall be punished. [1]"),
+                         "Whoever commits theft shall be punished. [1]")
+        self.assertEqual(normalize_answer("[1] uncited otherwise"), "[1] uncited otherwise")
+
     def test_markdown_refusal_is_a_refusal(self):
         from rag.answer import is_refusal, normalize_answer
         self.assertEqual(normalize_answer("**NOT_FOUND:** no provision"), "NOT_FOUND: no provision")

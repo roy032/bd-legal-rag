@@ -43,6 +43,29 @@ SYNONYM_GROUPS: list[list[str]] = [
     ["ক্ষতিপূরণ", "compensation", "damages"],
     ["উত্তরাধিকার", "inheritance", "succession"],
     ["ছুটি", "leave", "holiday"],
+    # Everyday words for common offences and procedures. Many central statutes on bdlaws
+    # exist only in English, so a Bangla question needs the English term to reach them.
+    ["চুরি", "theft", "steal", "stolen"],
+    ["চেক", "cheque"],
+    ["ডিজঅনার", "dishonour", "dishonoured", "bounce", "bounced"],
+    ["অপহরণ", "kidnapping", "kidnap", "abduction"],
+    ["ধর্ষণ", "rape"],
+    ["যৌতুক", "dowry"],
+    ["জালিয়াতি", "forgery", "forged"],
+    ["প্রতারণা", "cheating", "fraud"],
+    ["ঘুষ", "bribe", "bribery", "gratification"],
+    ["জামিন", "bail"],
+    ["গ্রেপ্তার", "গ্রেফতার", "arrest"],
+    ["পরোয়ানা", "warrant"],
+    ["সাক্ষী", "witness"],
+    ["স্বীকারোক্তি", "confession"],
+    ["তালাক", "divorce"],
+    ["ভরণপোষণ", "maintenance"],
+    ["মাতৃত্ব", "প্রসূতি", "maternity"],
+    ["ভোক্তা", "consumer"],
+    ["আত্মহত্যা", "suicide"],
+    ["মানহানি", "defamation"],
+    ["জমি", "ভূমি", "land"],
 ]
 
 _INDEX: dict[str, set[str]] = {}

@@ -103,7 +103,10 @@ def ollama_llm(model: str | None = None, host: str = "http://localhost:11434",
                         "num_ctx": OLLAMA_NUM_CTX}})
         if r.status_code >= 400:          # Ollama explains itself in the body ("model not found")
             raise RuntimeError(f"Ollama HTTP {r.status_code} for model {model!r}: {r.text[:300]}")
-        return r.json().get("response", "")
+        data = r.json()
+        if data.get("error"):             # e.g. not enough memory to load the model
+            raise RuntimeError(f"Ollama error for model {model!r}: {data['error']}")
+        return data.get("response", "")
 
     return call
 
@@ -211,20 +214,27 @@ def ollama_stream(model: str | None = None, host: str = "http://localhost:11434"
     model = model or os.environ.get("RAG_MODEL", "qwen2.5:7b")
 
     def call(system: str, prompt: str) -> Iterator[str]:
-        # (connect, read): the read timeout applies between chunks, so a model
-        # that stalls mid-answer fails instead of holding the connection forever.
-        with requests.post(f"{host}/api/generate", stream=True, timeout=(10, timeout_s),
-                           json={"model": model, "system": system, "prompt": prompt,
-                                 "stream": True,
-                                 "options": {"temperature": 0, "num_predict": DEFAULT_MAX_TOKENS,
-                                             "num_ctx": OLLAMA_NUM_CTX}}) as r:
-            r.raise_for_status()
-            for line in r.iter_lines():
-                if not line:
-                    continue
-                piece = _json.loads(line).get("response")
-                if piece:
-                    yield piece
+        try:
+            # (connect, read): the read timeout applies between chunks, so a model
+            # that stalls mid-answer fails instead of holding the connection forever.
+            with requests.post(f"{host}/api/generate", stream=True, timeout=(10, timeout_s),
+                               json={"model": model, "system": system, "prompt": prompt,
+                                     "stream": True,
+                                     "options": {"temperature": 0, "num_predict": DEFAULT_MAX_TOKENS,
+                                                 "num_ctx": OLLAMA_NUM_CTX}}) as r:
+                if r.status_code >= 400:
+                    raise LLMError(f"Ollama HTTP {r.status_code} for model {model!r}: {r.text[:300]}")
+                for line in r.iter_lines():
+                    if not line:
+                        continue
+                    obj = _json.loads(line)
+                    if obj.get("error"):      # Ollama reports load failures inside a 200 stream
+                        raise LLMError(f"Ollama error for model {model!r}: {obj['error']}")
+                    piece = obj.get("response")
+                    if piece:
+                        yield piece
+        except requests.RequestException as e:   # Ollama not running, or the connection dropped
+            raise LLMError(f"Ollama unreachable at {host}: {e}") from e
 
     return call
 

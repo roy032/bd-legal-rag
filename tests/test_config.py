@@ -53,6 +53,37 @@ class TestServiceConfig(unittest.TestCase):
         self.assertEqual(_client(Req(), trust_proxy=True), "1.2.3.4")
 
 
+@unittest.skipUnless(HAVE_STARLETTE, "starlette not installed")
+class TestLazyBuild(unittest.TestCase):
+    def test_concurrent_first_requests_load_the_models_once(self):
+        """Parallel first requests used to load bge-m3 once each and run out of memory."""
+        import threading
+        from unittest import mock as m
+
+        from service.app import create_app
+        calls = []
+
+        def slow_embedder(*a, **kw):
+            calls.append(1)
+            import time
+            time.sleep(0.2)
+
+        cfg = ServiceConfig(rate_per_min=6000, burst=100, preload=False)
+        with m.patch("rag.embed.embedder_for", slow_embedder), \
+             m.patch("rag.pipeline.load_records", lambda *a, **k: []), \
+             m.patch("rag.pipeline.build_pipeline", lambda *a, **k: object()), \
+             m.patch("rag.llm.get_llm", lambda *a, **k: None), \
+             m.patch("rag.llm.get_stream_llm", lambda *a, **k: None), \
+             m.patch("service.app.index_fingerprint", lambda *a: "x"):
+            build = create_app(cfg).state.build
+            threads = [threading.Thread(target=build) for _ in range(4)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+        self.assertEqual(len(calls), 1)
+
+
 class TestAutoEmbedder(unittest.TestCase):
     def test_auto_follows_the_index(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -96,7 +96,13 @@ class SectionLookup:
         return [hit] if hit else []
 
     def find_acts(self, query: str, limit: int = 5) -> list[tuple[int, str]]:
-        words = [w for w in query.lower().split() if len(w) > 2]
+        from ingest.textutils import nfc
+
+        from .refs import ACT_ALIASES
+        q = nfc(query.lower())
+        # Colloquial Bangla names ("দণ্ডবিধি") -> words of the official title ("penal code").
+        q = " ".join([q] + [phrase for alias, phrase in ACT_ALIASES.items() if alias in q])
+        words = [w for w in q.split() if len(w) > 2]
         scored = [(sum(w in title.lower() for w in words), aid, title)
                   for aid, title in self.acts.items()]
         return [(aid, title) for score, aid, title in sorted(scored, reverse=True)
@@ -113,9 +119,15 @@ class ToolBox:
     def search(self, query: str, k: int | None = None, language: str | None = None,
                act_id: int | None = None) -> str:
         hits = self.pipeline.search(query, k=k or self.k, language=language, act_id=act_id)
+        note = ""
+        if not hits and (language or act_id):
+            # A guessed act_id or a language filter (many acts exist only in English) often
+            # empties the result; fall back to the unfiltered search and say so.
+            hits = self.pipeline.search(query, k=k or self.k)
+            note = "(no match with those filters; these are unfiltered results)\n"
         if not hits:
             return "No provisions matched. Try different wording, or a different act."
-        return self.book.render(self.book.add(hits))
+        return note + self.book.render(self.book.add(hits))
 
     def get_section(self, act_id: int, section: str) -> str:
         hits = self.lookup.get(int(act_id), section)
