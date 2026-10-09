@@ -18,10 +18,28 @@ from ingest.textutils import bn_to_ascii_digits, nfc
 # The optional letter suffix ("304A", "৫ক") must touch the digits and end the
 # token: "ধারা ৩০২ কী" is section 302, not "302ক", and "section 2 of" is not "2OF".
 # "article"/"অনুচ্ছেদ" because the Constitution numbers its provisions as articles.
-SECTION_REF = re.compile(nfc(r"(?:ধারা(?:র|য়|য়ে|তে)?|উপ-?ধারা|অনুচ্ছেদ(?:ের|ে)?|section|sec\.?|s\.|"
+SECTION_REF = re.compile(nfc(r"(?:ধারা(?:র|য়|য়ে|তে)?|উপ-?ধারা|অনুচ্ছেদ(?:ের|ে)?|sections?|sec\.?|ss?\.|"
                              r"article|art\.)\s*"
                              r"([0-9০-৯]+(?:[A-Za-z]{1,2}(?![A-Za-z])|[ক-হ](?![ঀ-৿]))?)"),
                          re.IGNORECASE)
+
+
+_NUM = r"[0-9০-৯]+(?:[A-Za-z]{1,2}(?![A-Za-z])|[ক-হ](?![ঀ-৿]))?"
+# "ধারা ৩০২ ও ৩০৪", "sections 302, 304 and 304A": numbers chained after the first one.
+_MORE_REFS = re.compile(nfc(rf"\s*(?:,|ও|এবং|আর|and|&|or|বা)\s*(?:ধারা\s*)?({_NUM})"), re.IGNORECASE)
+
+
+def section_numbers(question: str, limit: int = 4) -> list[str]:
+    """Every section number the question names, including ones listed after the first."""
+    found: list[str] = []
+    for m in SECTION_REF.finditer(question):
+        found.append(m.group(1))
+        end = m.end()
+        while (more := _MORE_REFS.match(question, end)):
+            found.append(more.group(1))
+            end = more.end()
+    nums = [bn_to_ascii_digits(n).replace(" ", "").upper() for n in found]
+    return list(dict.fromkeys(nums))[:limit]
 
 
 def expand_section_refs(question: str) -> str:
@@ -32,8 +50,7 @@ def expand_section_refs(question: str) -> str:
     never fires when no section number is mentioned.
     """
     extras: list[str] = []
-    for raw in SECTION_REF.findall(question):
-        num = bn_to_ascii_digits(raw).replace(" ", "")
+    for num in section_numbers(question):
         extras += [f"ধারা {num}", f"section {num}", num]
     return f"{question} {' '.join(dict.fromkeys(extras))}".strip() if extras else question
 

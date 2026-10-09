@@ -53,6 +53,9 @@ class EvidenceBook:
         for n in chosen:
             h = self.hits[n - 1]
             head = f"[{n}] {h.citation}"
+            if h.metadata.get("act_id") is not None:
+                # Shown so the model can call get_section with a real act_id, not a guess.
+                head += f" (act_id {h.metadata['act_id']})"
             if h.metadata.get("section_title"):
                 head += f" — {h.metadata['section_title']}"
             if h.metadata.get("amended"):
@@ -131,10 +134,19 @@ class ToolBox:
 
     def get_section(self, act_id: int, section: str) -> str:
         hits = self.lookup.get(int(act_id), section)
+        note = ""
+        if not hits:
+            # Small models guess act_ids. If an act already in the evidence has this
+            # section, that is almost always the one meant.
+            for aid in dict.fromkeys(h.metadata.get("act_id") for h in self.book.hits):
+                if aid is not None and (hits := self.lookup.get(int(aid), section)):
+                    note = f"(act {act_id} has no section {section}; using act_id {aid}, " \
+                           f"which is already in your excerpts)\n"
+                    break
         if not hits:
             return (f"No section {section} in act {act_id}. Use search to find the right act, "
                     f"and check the act_id shown in an excerpt you already have.")
-        return self.book.render(self.book.add(hits))
+        return note + self.book.render(self.book.add(hits))
 
     def follow_refs(self, excerpt: int, limit: int = 3) -> str:
         """Fetch what excerpt [n] points at — sections of the same act, and other acts."""

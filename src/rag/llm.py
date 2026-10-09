@@ -89,11 +89,27 @@ def openai_llm(model: str | None = None, max_tokens: int = DEFAULT_MAX_TOKENS,
     return call
 
 
-def ollama_llm(model: str | None = None, host: str = "http://localhost:11434",
+DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434"
+
+
+def ollama_host(host: str | None = None) -> str:
+    """Ollama's base URL: OLLAMA_HOST if set, else `host`, else 127.0.0.1.
+
+    127.0.0.1 rather than "localhost": on Windows "localhost" resolves to ::1 first, and
+    Ollama listens on IPv4 only, so every request waited about 2 s for the IPv6 attempt
+    to fail. Ollama's own convention allows a bare "host:port", so add the scheme.
+    """
+    h = (os.environ.get("OLLAMA_HOST") or host or DEFAULT_OLLAMA_HOST).strip().rstrip("/")
+    if not h.startswith(("http://", "https://")):
+        h = "http://" + h
+    return h.replace("://0.0.0.0", "://127.0.0.1")
+
+
+def ollama_llm(model: str | None = None, host: str | None = None,
                timeout_s: float = DEFAULT_TIMEOUT_S) -> LLM:
     import requests
 
-    host = os.environ.get("OLLAMA_HOST", host).rstrip("/")
+    host = ollama_host(host)
     model = model or os.environ.get("RAG_MODEL", "qwen2.5:7b")
 
     def call(system: str, prompt: str) -> str:
@@ -204,13 +220,13 @@ def openai_stream(model: str | None = None, max_tokens: int = DEFAULT_MAX_TOKENS
     return call
 
 
-def ollama_stream(model: str | None = None, host: str = "http://localhost:11434",
+def ollama_stream(model: str | None = None, host: str | None = None,
                   timeout_s: float = DEFAULT_TIMEOUT_S) -> StreamLLM:
     import json as _json
 
     import requests
 
-    host = os.environ.get("OLLAMA_HOST", host).rstrip("/")
+    host = ollama_host(host)
     model = model or os.environ.get("RAG_MODEL", "qwen2.5:7b")
 
     def call(system: str, prompt: str) -> Iterator[str]:

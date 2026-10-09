@@ -224,3 +224,51 @@ class TestAgentLoop(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+PENAL = [
+    chunk("p302", "The Penal Code, 1860 > Section 302: Punishment for murder\n\nWhoever commits murder "
+                  "shall be punished with death, or imprisonment for life.",
+          act_id=2, act_title="The Penal Code, 1860", act_year=1860, language="en", section_id=302,
+          section_number="302", section_number_ascii="302", section_title="Punishment for murder"),
+    chunk("p304", "The Penal Code, 1860 > Section 304: Punishment for culpable homicide not amounting "
+                  "to murder\n\nWhoever commits culpable homicide not amounting to murder shall be punished.",
+          act_id=2, act_title="The Penal Code, 1860", act_year=1860, language="en", section_id=304,
+          section_number="304", section_number_ascii="304",
+          section_title="Punishment for culpable homicide not amounting to murder"),
+]
+
+
+class TestNamedSections(unittest.TestCase):
+    """The live failure: "দণ্ডবিধির ধারা ৩০২ ও ৩০৪ এর পার্থক্য কী?" ended NOT_FOUND because the
+    model guessed act_id 1 and only section 302 was recognised as a reference."""
+
+    def setUp(self):
+        emb = HashingEmbedder(dim=256)
+        store = NumpyStore(emb.dim, emb.name)
+        self.docs = DOCS + PENAL
+        store.add(emb.encode_passages([c["text"] for c in self.docs]), self.docs)
+        self.pipeline = SearchPipeline(RetrievalConfig(mode="dense"), dense=Retriever(emb, store))
+
+    def test_every_listed_section_number_is_found(self):
+        from rag.query import section_numbers
+        self.assertEqual(section_numbers("দণ্ডবিধির ধারা ৩০২ ও ৩০৪ এর পার্থক্য কী?"), ["302", "304"])
+        self.assertEqual(section_numbers("sections 302, 304 and 304A"), ["302", "304", "304A"])
+        self.assertEqual(section_numbers("ধারা ৩০২ কী বলে?"), ["302"])
+        self.assertEqual(section_numbers("হত্যার শাস্তি কী?"), [])
+
+    def test_seed_fetches_both_named_sections(self):
+        llm = ScriptedLLM("ANSWER: Section 302 punishes murder [1]; section 304 culpable homicide [2].")
+        agent = LegalAgent(self.pipeline, self.docs, llm, AgentConfig(seed=True))
+        ans = agent.run("দণ্ডবিধির ধারা ৩০২ ও ৩০৪ এর পার্থক্য কী?")
+        self.assertEqual(ans.checks["trace"][0]["exact_sections"], 2)
+        self.assertEqual([h.chunk_id for h in ans.hits[:2]], ["p302", "p304"])
+        self.assertIn("(act_id 2)", llm.prompts[0])        # the model sees the real act_id
+
+    def test_wrong_act_id_falls_back_to_an_act_already_in_evidence(self):
+        book = EvidenceBook()
+        tools = ToolBox(self.pipeline, SectionLookup(self.docs), book)
+        book.add([h for h in self.pipeline.search("murder", k=8) if h.chunk_id == "p302"])
+        out = tools.get_section(1, "304")
+        self.assertIn("using act_id 2", out)
+        self.assertIn("culpable homicide", out)

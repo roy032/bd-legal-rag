@@ -55,7 +55,7 @@ An agent mode sits alongside the single-shot path: the model calls `search`,
 
 ```bash
 pip install -e ".[serve]"     # or: make install
-make test                     # 248 tests, all offline — no API key, no model download
+make test                     # 253 tests, all offline — no API key, no model download
 make demo                     # full pipeline + ablation on the bundled sample corpus
 make serve                    # API + UI on :8000
 ```
@@ -79,7 +79,7 @@ RAG_LLM=anthropic RAG_MODEL=claude-sonnet-4-5 ANTHROPIC_API_KEY=sk-... make serv
 
 # Local Ollama (start Ollama and pull a model first)
 ollama pull qwen2.5:7b
-RAG_LLM=ollama RAG_MODEL=qwen2.5:7b OLLAMA_HOST=http://localhost:11434 make serve
+RAG_LLM=ollama RAG_MODEL=qwen2.5:7b OLLAMA_HOST=http://127.0.0.1:11434 make serve
 ```
 
 Without a provider, the service returns retrieved provisions with HTTP 503 instead of

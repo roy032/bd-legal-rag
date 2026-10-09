@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 
 from .answer import REFUSAL_MARK, Answer, check_citations, normalize_answer
 from .guardrails import GuardConfig, repair_instruction, run_checks
+from .refs import ActResolver
 from .tools import EvidenceBook, SectionLookup, ToolBox
 
 SYSTEM = """You are a legal research agent working with the laws of Bangladesh.
@@ -114,6 +115,7 @@ class LegalAgent:
     def __init__(self, pipeline, records: list[dict], llm, config: AgentConfig | None = None):
         self.pipeline = pipeline
         self.lookup = SectionLookup(records)
+        self.resolver = ActResolver(records)
         self.llm = llm
         self.cfg = config or AgentConfig()
 
@@ -129,8 +131,14 @@ class LegalAgent:
         # Start from the single-shot retrieval (which already resolves "দণ্ডবিধির ধারা ৩০২"
         # to the section) so the model sees real act_ids instead of guessing them.
         if cfg.seed:
-            seeded = book.add(self.pipeline.search(question, k=cfg.per_call_k))
-            trace.append({"step": 0, "type": "seed", "new_excerpts": len(seeded)})
+            # Sections the question names outright ("দণ্ডবিধির ধারা ৩০২ ও ৩০৪") are fetched
+            # exactly first; a comparison needs both, and search ranks only one of them high.
+            ref = self.resolver.resolve(question)
+            exact = [h for aid in ref.act_ids[:2] for num in ref.numbers
+                     for h in self.lookup.get(aid, num, max_parts=2)]
+            seeded = book.add(exact + self.pipeline.search(question, k=cfg.per_call_k))
+            trace.append({"step": 0, "type": "seed", "new_excerpts": len(set(seeded)),
+                          "exact_sections": len(exact)})
         seen_actions: set[str] = set()
         stalled = 0
         calls = 0

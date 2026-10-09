@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 
 from ingest.textutils import bn_to_ascii_digits, nfc, normalize
 
-from .query import SECTION_REF
+from .query import section_numbers
 from .store import Hit
 
 # Colloquial name -> a phrase that occurs in the official title on bdlaws.
@@ -114,8 +114,7 @@ class ActResolver:
                     for aid in self._principal(phrase):
                         if aid not in acts:
                             acts.append(aid)
-        numbers = [bn_to_ascii_digits(n).replace(" ", "").upper() for n in SECTION_REF.findall(question)]
-        return Reference(act_ids=acts[:3], numbers=list(dict.fromkeys(numbers))[:4])
+        return Reference(act_ids=acts[:3], numbers=section_numbers(question))
 
     def lookup(self, act_id: int, number: str, max_parts: int = 3) -> list[Hit]:
         return self.by_number.get((act_id, number.upper()), [])[:max_parts]

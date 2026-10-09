@@ -364,9 +364,9 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         if (cfg.provider or "").lower() != "ollama":
             return None
         import urllib.request
-        host = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
-        if not host.startswith("http"):
-            host = "http://" + host
+
+        from rag.llm import ollama_host
+        host = ollama_host()
         try:
             with urllib.request.urlopen(f"{host}/api/version", timeout=2):
                 return True

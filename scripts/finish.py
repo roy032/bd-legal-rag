@@ -254,7 +254,7 @@ def ollama_probe(model: str) -> tuple[bool, str]:
     import urllib.error
     import urllib.request
 
-    host = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+    host = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
     if not host.startswith("http"):
         host = "http://" + host
     body = json.dumps({"model": model, "prompt": "Say OK.", "stream": False,

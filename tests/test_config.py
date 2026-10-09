@@ -95,3 +95,25 @@ class TestAutoEmbedder(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestOllamaHost(unittest.TestCase):
+    def setUp(self):
+        self._saved = os.environ.pop("OLLAMA_HOST", None)
+
+    def tearDown(self):
+        os.environ.pop("OLLAMA_HOST", None)
+        if self._saved is not None:
+            os.environ["OLLAMA_HOST"] = self._saved
+
+    def test_default_is_ipv4_loopback(self):
+        # "localhost" costs ~2 s per request on Windows (IPv6 tried first)
+        from rag.llm import ollama_host
+        self.assertEqual(ollama_host(), "http://127.0.0.1:11434")
+
+    def test_env_without_scheme_and_bind_all_address(self):
+        from rag.llm import ollama_host
+        os.environ["OLLAMA_HOST"] = "0.0.0.0:11434"
+        self.assertEqual(ollama_host(), "http://127.0.0.1:11434")
+        os.environ["OLLAMA_HOST"] = "https://ollama.example.com/"
+        self.assertEqual(ollama_host(), "https://ollama.example.com")
