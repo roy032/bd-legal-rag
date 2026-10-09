@@ -60,7 +60,9 @@ Tools:
 {tools}
 
 Rules:
-- One action per turn. Do not invent tools or arguments.
+- One action per turn, written as JSON exactly as shown. Do not invent tools or arguments.
+- Write THINK in English or in the language of the question.
+- When a tool says the excerpts are already in your list, stop looking and ANSWER.
 - Search again with different wording if the first search misses; do not repeat the same
   search twice.
 - If an excerpt says a term is defined elsewhere, use follow_refs on that excerpt.
@@ -73,6 +75,8 @@ Rules:
 # Small local models decorate the markers ("**Answer:**", "Action -"), so match loosely.
 ACTION_RE = re.compile(r"^[\s*#]*ACTION\**\s*[:\-]\**\s*(?:```(?:json)?\s*)?([\[{].*)", re.S | re.I | re.M)
 ANSWER_RE = re.compile(r"^[\s*#]*(?:FINAL\s+)?ANSWER\**\s*[:\-]\**\s*(.*)", re.S | re.I | re.M)
+# ...or as a function call: "ACTION: compare_sections({"act_id": 11, ...})"
+CALL_RE = re.compile(r"^[\s*#]*ACTION\**\s*[:\-]\**\s*`*([a-z_]+)\s*\(\s*(\{.*)", re.S | re.I | re.M)
 CITED = re.compile(r"\[\d+\]")
 
 
@@ -97,6 +101,14 @@ def _parse_action(text: str) -> tuple[str | None, dict]:
 
 def _parse_actions(text: str) -> list[dict]:
     """Every tool call after ACTION:. Accepts one object or a list of them."""
+    fm = CALL_RE.search(text or "")
+    if fm:
+        try:
+            args, _ = json.JSONDecoder().raw_decode(fm.group(2))
+        except json.JSONDecodeError:
+            args = None
+        if isinstance(args, dict):
+            return [{"tool": fm.group(1), "args": args}]
     m = ACTION_RE.search(text or "")
     if not m:
         return []
@@ -221,9 +233,10 @@ class LegalAgent:
                               refused=True, latency_s=time.perf_counter() - t0,
                               llm_calls=calls, checks={"trace": trace, "stop_reason": stop_reason})
             final = (self.llm(system, f"Question: {question}\n\nExcerpts:\n{book.render()}\n\n"
-                                      f"You are out of actions. Answer now from these excerpts "
-                                      f"only, citing [n], or reply ANSWER: NOT_FOUND: <what is "
-                                      f"missing>.") or "").strip()
+                                      f"You are out of actions. If these excerpts contain the "
+                                      f"provisions the question asks about, answer from them now, "
+                                      f"citing [n] after every sentence. Only if they do not, reply "
+                                      f"ANSWER: NOT_FOUND: <what is missing>.") or "").strip()
             calls += 1
             match = ANSWER_RE.search(final)
             final = match.group(1).strip() if match else final

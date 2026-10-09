@@ -299,3 +299,25 @@ class TestLooseFormat(unittest.TestCase):
         ans = self.run_with('THINK: to answer: I need the section\nACTION: {"tool": "search", "args": {"query": "হত্যা"}}',
                             "ANSWER: হত্যার শাস্তি মৃত্যুদণ্ড [1]।")
         self.assertEqual(ans.checks["trace"][1]["type"], "tool")
+
+
+class TestSmallModelHabits(unittest.TestCase):
+    """From the live run: function-call syntax, and re-requesting sections already held."""
+
+    def setUp(self):
+        self.pipeline, self.records = build()
+
+    def test_function_call_syntax_is_parsed(self):
+        from rag.agent import _parse_actions
+        calls = _parse_actions('THINK: compare them\nACTION: compare_sections({"act_id": 1, '
+                               '"section_a": "3", "section_b": "7"})')
+        self.assertEqual(calls, [{"tool": "compare_sections",
+                                  "args": {"act_id": 1, "section_a": "3", "section_b": "7"}}])
+
+    def test_tool_says_when_sections_are_already_held(self):
+        book = EvidenceBook()
+        tools = ToolBox(self.pipeline, SectionLookup(self.records), book)
+        tools.get_section(1, "7")
+        again = tools.get_section(1, "7")
+        self.assertIn("already in your excerpts", again)
+        self.assertIn("ANSWER now", again)

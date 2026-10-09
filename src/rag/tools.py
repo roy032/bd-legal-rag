@@ -112,6 +112,21 @@ class SectionLookup:
                 if score > 0][:limit]
 
 
+def _show(book: EvidenceBook, hits: list[Hit]) -> str:
+    """Add hits to the book and render them; say so when they were all there already,
+    because small models otherwise ask for the same sections again instead of answering."""
+    before = len(book)
+    numbers = book.add(hits)
+    if len(book) == before and numbers:
+        have = "; ".join(f"[{n}] {book.hits[n - 1].citation}"
+                         + (f" — {book.hits[n - 1].metadata['section_title']}"
+                            if book.hits[n - 1].metadata.get("section_title") else "")
+                         for n in dict.fromkeys(numbers))
+        return (f"(already in your excerpts: {have}. Nothing new. If they answer the "
+                f"question, reply with ANSWER now.)")
+    return book.render(numbers)
+
+
 class ToolBox:
     def __init__(self, pipeline, lookup: SectionLookup, book: EvidenceBook,
                  per_call_k: int = 5) -> None:
@@ -130,7 +145,7 @@ class ToolBox:
             note = "(no match with those filters; these are unfiltered results)\n"
         if not hits:
             return "No provisions matched. Try different wording, or a different act."
-        return note + self.book.render(self.book.add(hits))
+        return note + _show(self.book, hits)
 
     def get_section(self, act_id: int, section: str) -> str:
         hits = self.lookup.get(int(act_id), section)
@@ -146,7 +161,7 @@ class ToolBox:
         if not hits:
             return (f"No section {section} in act {act_id}. Use search to find the right act, "
                     f"and check the act_id shown in an excerpt you already have.")
-        return note + self.book.render(self.book.add(hits))
+        return note + _show(self.book, hits)
 
     def follow_refs(self, excerpt: int, limit: int = 3) -> str:
         """Fetch what excerpt [n] points at — sections of the same act, and other acts."""
@@ -170,14 +185,14 @@ class ToolBox:
             named = refs + [e.get("title", "") for e in act_refs]
             return (f"Excerpt [{excerpt}] refers to {named}, but none of them are in the "
                     f"corpus — say so in your answer rather than guessing their contents.")
-        return self.book.render(self.book.add(found))
+        return _show(self.book, found)
 
     def compare_sections(self, act_id: int, section_a: str, section_b: str) -> str:
         """Put two provisions side by side — 'what is the difference between 302 and 304A?'."""
         hits = self.lookup.get(int(act_id), section_a) + self.lookup.get(int(act_id), section_b)
         if not hits:
             return f"Neither section {section_a} nor {section_b} is in act {act_id}."
-        return self.book.render(self.book.add(hits))
+        return _show(self.book, hits)
 
     def list_acts(self, query: str) -> str:
         """Find the act_id for an act named in the question."""
