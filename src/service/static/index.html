@@ -62,10 +62,10 @@
 <body>
 <div class="wrap">
   <h1>Bangladesh Law Assistant <span style="font-weight:400">· বাংলাদেশ আইন সহায়ক</span></h1>
-  <div class="sub">Answers grounded in the text of the Acts, with the section cited. Ask in Bangla or English.</div>
+  <div class="sub">Ask about the law or describe your situation, in Bangla or English. Every answer cites the section it relies on.</div>
 
   <form id="f">
-    <input type="text" id="q" placeholder="ধারা ৩০২ কী বলে?  /  What is the punishment for negligence?" autocomplete="off">
+    <input type="text" id="q" placeholder="ধারা ৩০২ কী বলে?  /  My landlord locked me out. What can I do?" autocomplete="off">
     <button id="go" type="submit">Ask</button>
   </form>
   <div class="opts">
@@ -95,7 +95,9 @@
 <script>
 const $ = id => document.getElementById(id);
 const EXAMPLES = ["দণ্ডবিধির ধারা ৩০২ কী বলে?", "When can the police arrest without a warrant?",
-                  "শ্রমিকের দৈনিক কর্মঘণ্টা কত?", "What happens if a cheque bounces?"];
+                  "শ্রমিকের দৈনিক কর্মঘণ্টা কত?", "What happens if a cheque bounces?",
+                  "কেউ আদালতের আদেশ ছাড়া আমার জমি দখল করেছে, আমি কী করব?",
+                  "My employer has not paid my salary for two months. What can I do?"];
 $("examples").innerHTML = EXAMPLES.map(e => `<button class="ex" data-q="${e.replace(/"/g, "&quot;")}">${e}</button>`).join(" · ");
 $("examples").onclick = e => { if (e.target.dataset.q) { $("q").value = e.target.dataset.q; $("f").requestSubmit(); } };
 

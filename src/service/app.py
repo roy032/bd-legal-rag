@@ -136,7 +136,7 @@ class ServiceConfig:
             rerank=_env_str("BDRAG_RERANK", "none"),
             rerank_model=_env_str("BDRAG_RERANK_MODEL", "BAAI/bge-reranker-v2-m3"),
             rerank_top=_env_int("BDRAG_RERANK_TOP", 20),
-            rewrite=_env_str("BDRAG_REWRITE", "none"),
+            rewrite=_env_str("BDRAG_REWRITE", "colloquial"),
             expand_refs=_env_bool("BDRAG_EXPAND_REFS", True),
             synonyms=_env_bool("BDRAG_SYNONYMS", True),
             transliterate=_env_bool("BDRAG_TRANSLITERATE", True),
@@ -236,9 +236,16 @@ MULTI_HOP_HINTS = ("difference", "compare", "পার্থক্য", "তু�
 
 
 def wants_agent(question: str) -> bool:
-    """Cheap router: only pay for multi-step retrieval when the question needs it."""
+    """Cheap router: only pay for multi-step retrieval when the question needs it.
+
+    A personal situation ("my landlord locked me out, what can I do?") usually needs
+    several provisions at once (the right, the penalty, where to complain), which
+    is what the agent's multiple searches are for."""
+    from rag.scope import classify_request
+
     low = question.lower()
-    return any(h in low for h in MULTI_HOP_HINTS) or low.count("?") > 1
+    return (any(h in low for h in MULTI_HOP_HINTS) or low.count("?") > 1
+            or classify_request(question)["advice"])
 
 
 def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
