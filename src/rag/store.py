@@ -147,16 +147,26 @@ class NumpyStore:
 
 
 class QdrantStore:
-    """Production backend. Same interface; needs `pip install qdrant-client`
-    and a running Qdrant (`docker run -p 6333:6333 qdrant/qdrant`)."""
+    """Production backend. Same interface as NumpyStore; needs
+    `pip install qdrant-client` and either a running Qdrant
+    (`docker run -p 6333:6333 qdrant/qdrant`) or a local location.
+
+    location=":memory:" or path="data/qdrant" run Qdrant's embedded mode with no
+    server: that is how the tests compare it against NumpyStore."""
 
     def __init__(self, dim: int, collection: str = "bdlaws", url: str = "http://localhost:6333",
-                 embedder_name: str = "", recreate: bool = False) -> None:
+                 embedder_name: str = "", recreate: bool = False,
+                 location: str | None = None, path: str | None = None) -> None:
         from qdrant_client import QdrantClient
         from qdrant_client.models import Distance, VectorParams
 
         self.dim, self.collection, self.embedder_name = dim, collection, embedder_name
-        self.client = QdrantClient(url=url)
+        if location:
+            self.client = QdrantClient(location=location)
+        elif path:
+            self.client = QdrantClient(path=path)
+        else:
+            self.client = QdrantClient(url=url)
         exists = self.client.collection_exists(collection)
         if recreate and exists:
             self.client.delete_collection(collection)
@@ -164,16 +174,38 @@ class QdrantStore:
         if not exists:
             self.client.create_collection(
                 collection, vectors_config=VectorParams(size=dim, distance=Distance.COSINE))
-        self._n = 0
+        # Continue numbering after what is already stored: starting from 0 again
+        # would silently overwrite existing points on a second add().
+        self._n = len(self)
+        self._records: list[dict] | None = None
 
     def __len__(self) -> int:
-        return self.client.count(self.collection).count
+        return self.client.count(self.collection, exact=True).count
+
+    @property
+    def records(self) -> list[dict]:
+        """Every stored record, in insertion order (exact lookup and BM25 need them)."""
+        if self._records is None:
+            out: list[tuple[int, dict]] = []
+            offset = None
+            while True:
+                points, offset = self.client.scroll(self.collection, limit=1024, offset=offset,
+                                                    with_payload=True, with_vectors=False)
+                out += [(int(p.id), dict(p.payload or {})) for p in points]
+                if offset is None:
+                    break
+            self._records = [r for _, r in sorted(out, key=lambda p: p[0])]
+        return self._records
 
     def add(self, vectors: np.ndarray, records: Iterable[dict], batch: int = 256) -> None:
         from qdrant_client.models import PointStruct
 
         records = list(records)
         vectors = l2_normalize(np.asarray(vectors, dtype=np.float32))
+        if vectors.shape[1] != self.dim:
+            raise ValueError(f"expected dim {self.dim}, got {vectors.shape[1]}")
+        if len(records) != len(vectors):
+            raise ValueError("vectors and records out of sync")
         points = [
             PointStruct(id=self._n + i, vector=vectors[i].tolist(), payload=r)
             for i, r in enumerate(records)
@@ -181,25 +213,41 @@ class QdrantStore:
         for i in range(0, len(points), batch):
             self.client.upsert(self.collection, points=points[i:i + batch])
         self._n += len(points)
+        self._records = None
 
     def search(self, query_vec: np.ndarray, k: int = 5,
-               filters: dict[str, Any] | None = None, where=None) -> list[Hit]:
+               filters: dict[str, Any] | None = None,
+               where: Callable[[dict], bool] | None = None) -> list[Hit]:
         from qdrant_client.models import FieldCondition, Filter, MatchAny, MatchValue
 
         qfilter = None
+        local: dict[str, Any] = {}
         if filters:
             must = []
             for key, want in filters.items():
                 if callable(want):
-                    continue  # not expressible server-side; filter after retrieval
-                cond = MatchAny(any=list(want)) if isinstance(want, (list, tuple, set)) else MatchValue(value=want)
+                    local[key] = want      # not expressible server-side: applied below
+                    continue
+                cond = (MatchAny(any=list(want)) if isinstance(want, (list, tuple, set))
+                        else MatchValue(value=want))
                 must.append(FieldCondition(key=f"metadata.{key}", match=cond))
-            qfilter = Filter(must=must)
-        res = self.client.query_points(
-            self.collection, query=np.asarray(query_vec, dtype=np.float32).tolist(),
-            limit=k, query_filter=qfilter, with_payload=True).points
-        return [
-            Hit(chunk_id=p.payload["chunk_id"], score=float(p.score), text=p.payload["text"],
-                body=p.payload["body"], metadata=p.payload["metadata"])
-            for p in res
-        ]
+            qfilter = Filter(must=must) if must else None
+        q = l2_normalize(np.asarray(query_vec, dtype=np.float32).reshape(1, -1))[0].tolist()
+        post = bool(local) or where is not None
+        limit = k * 4 if post else k
+        total = len(self)
+        while True:
+            res = self.client.query_points(self.collection, query=q, limit=limit,
+                                           query_filter=qfilter, with_payload=True).points
+            hits = [Hit(chunk_id=p.payload["chunk_id"], score=float(p.score),
+                        text=p.payload["text"], body=p.payload["body"],
+                        metadata=p.payload["metadata"])
+                    for p in res if p.payload is not None]
+            if post:
+                hits = [h for h in hits if matches(h.metadata, local)
+                        and (where is None or where(h.metadata))]
+            # A predicate can reject most of a page: widen until k survive or
+            # the collection is exhausted.
+            if len(hits) >= k or len(res) < limit or limit >= total:
+                return hits[:k]
+            limit *= 4

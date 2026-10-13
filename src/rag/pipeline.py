@@ -259,18 +259,32 @@ def add_retrieval_args(ap) -> None:
                     help="look up 'দণ্ডবিধির ধারা ৩০২' directly instead of searching for it")
 
 
+def open_store(index_dir: str | Path):
+    """The vector store an index directory describes: NumpyStore by default, or
+    the Qdrant collection build_index.py --backend qdrant recorded in index.json."""
+    import json
+
+    from .store import NumpyStore, QdrantStore
+
+    info_path = Path(index_dir) / "index.json"
+    info = json.loads(info_path.read_text(encoding="utf-8")) if info_path.exists() else {}
+    if info.get("backend") != "qdrant":
+        return NumpyStore.load(index_dir)
+    return QdrantStore(info["dim"], info.get("collection", "bdlaws"),
+                       url=info.get("url") or "http://localhost:6333", path=info.get("path"),
+                       embedder_name=info.get("embedder", ""))
+
+
 def build_pipeline(config, index_dir: str | Path, embedder, llm=None,
                    records: list[dict] | None = None) -> SearchPipeline:
     """Build from a RetrievalConfig (an argparse namespace is accepted too)."""
-    from .store import NumpyStore
-
     cfg = config if isinstance(config, RetrievalConfig) else RetrievalConfig.from_args(config)
     cfg = replace(cfg, embedder=getattr(embedder, "name", cfg.embedder))
     index_dir = Path(index_dir)
 
     dense = None
     if cfg.mode in ("dense", "hybrid"):
-        store = NumpyStore.load(index_dir)
+        store = open_store(index_dir)
         if embedder.dim != store.dim:
             raise SystemExit(f"index dim {store.dim} ({store.embedder_name}) "
                              f"!= embedder dim {embedder.dim} ({embedder.name}) — rebuild the index")
