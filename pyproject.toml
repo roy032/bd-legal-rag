@@ -22,7 +22,7 @@ serve = ["starlette>=0.37", "uvicorn[standard]>=0.30"]
 qdrant = ["qdrant-client>=1.9"]
 llm = ["anthropic>=0.39", "openai>=1.40"]
 redis = ["redis>=5.0"]
-dev = ["ruff>=0.6", "mypy>=1.11", "coverage>=7.6", "pip-audit>=2.7"]
+dev = ["httpx2>=2.0", "ruff>=0.6", "mypy>=1.11", "coverage>=7.6", "pip-audit>=2.7"]
 
 [project.scripts]
 bdrag = "rag.cli:main"
