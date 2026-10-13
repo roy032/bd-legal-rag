@@ -8,7 +8,7 @@ What is still open in this project. What has already been fixed is recorded in [
 - **New retrieval options are not yet measured on the full corpus.** `--rerank-top`, `--rewrite colloquial` and the `[REQUESTED SECTION]` prompt (answer-system/v4) are tested offline; they need a run with bge-m3, a reranker and an answering model to say whether they move the numbers. The ablation has a `dense+rerank@20` row for this.
 - **Evaluation set size.** 86 held-out questions is enough to compare configurations, not enough to claim tight confidence intervals. 16 more are drafted in `data/eval/eval_v2_draft.jsonl` and await review (`data/eval/REVIEW_V2.md`).
 - **Judge model.** Answer correctness is judged by an LLM. The judge is required to differ from the answering model, but it has not been calibrated against human labels.
-- **Corpus scope.** Coverage depends on the acts ingested (1,354); the Road Transport Act 2018, for example, is not in the corpus.
+- **Corpus scope.** Answers come only from the 1,354 acts ingested. Rules, SROs, gazette notifications and case law are not in the corpus, so questions that depend on them get a partial answer or NOT_FOUND.
 
 ## Next steps
 
