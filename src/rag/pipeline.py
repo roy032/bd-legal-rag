@@ -30,7 +30,7 @@ from .banglish import maybe_variant
 from .diversity import boost_in_force, mmr
 from .fusion import reciprocal_rank_fusion
 from .lexical import BM25Index
-from .lexicon import ROUTE_WEIGHTS, classify, expand_synonyms
+from .lexicon import ROUTE_WEIGHTS, classify, expand_synonyms, is_colloquial
 from .parent import ParentIndex, expand_to_parents
 from .query import expand_section_refs, hyde, multi_query
 from .refs import ActResolver, Reference, apply_reference
@@ -48,12 +48,14 @@ class RetrievalConfig:
     candidates: int = 50                 # per source, before fusion/rerank
     rerank: str = "none"                 # none | cross | lexical
     rerank_model: str = "BAAI/bge-reranker-v2-m3"
+    rerank_top: int = 0                  # 0 = rerank every candidate; else only the top N
     expand_refs: bool = False
     synonyms: bool = False
     transliterate: bool = False          # romanised Bangla -> Bangla variant
     route: bool = False                  # per-query-type fusion weights
     multi_query: int = 0                 # 0 = off; else number of rewrites requested
     hyde: bool = False
+    rewrite: str = "none"                # none | colloquial | always: LLM rewrite + HyDE
     mmr_lambda: float | None = None      # None = off; 0.7 is a sane start
     boost_in_force: bool = False
     parent_context: bool = False         # hand the model the whole section
@@ -104,9 +106,12 @@ class SearchPipeline:
         queries = [question]
         if cfg.transliterate and (variant := maybe_variant(question)):
             queries.append(variant)
-        if cfg.multi_query and self.llm:
-            queries = multi_query(question, self.llm, n=cfg.multi_query) + queries[1:]
-        if cfg.hyde and self.llm:
+        rewrite = self.llm is not None and (
+            cfg.rewrite == "always" or (cfg.rewrite == "colloquial" and is_colloquial(question)))
+        n_rewrites = cfg.multi_query or (3 if rewrite else 0)
+        if n_rewrites and self.llm:
+            queries = multi_query(question, self.llm, n=n_rewrites) + queries[1:]
+        if (cfg.hyde or rewrite) and self.llm:
             queries.append(hyde(question, self.llm))
         if cfg.synonyms:
             queries = [expand_synonyms(q) for q in queries]
@@ -175,7 +180,13 @@ class SearchPipeline:
             vectors = self.dense.embedder.encode_passages([h.text for h in candidates[:c]])
             candidates = mmr(candidates[:c], vectors, k=max(k, 1), lambda_=cfg.mmr_lambda)
         if self.reranker:
-            candidates = self.reranker.rerank(question, candidates[:c], k)
+            # The section the question names is a lookup, not a guess: keep it
+            # first whatever the reranker thinks of it.
+            pinned = [h for h in candidates if h.metadata.get("requested")]
+            pool = [h for h in candidates[:c] if not h.metadata.get("requested")]
+            if cfg.rerank_top:
+                pool = pool[:cfg.rerank_top]
+            candidates = pinned + self.reranker.rerank(question, pool, max(k - len(pinned), 0))
 
         hits = candidates[:k]
         if cfg.parent_context and self.parents:
@@ -228,12 +239,16 @@ def add_retrieval_args(ap) -> None:
     ap.add_argument("--candidates", type=int, default=50, help="per-source pool before fusion/rerank")
     ap.add_argument("--rerank", choices=["none", "cross", "lexical"], default="none")
     ap.add_argument("--rerank-model", default="BAAI/bge-reranker-v2-m3")
+    ap.add_argument("--rerank-top", type=int, default=0,
+                    help="rerank only the top N candidates (0 = all); 20 keeps a CPU usable")
     ap.add_argument("--expand-refs", action="store_true", help="also search 'section 302' for 'ধারা ৩০২'")
     ap.add_argument("--synonyms", action="store_true", help="expand legal synonyms (উচ্ছেদ ↔ eviction)")
     ap.add_argument("--transliterate", action="store_true", help="also search a Bangla variant of romanised input")
     ap.add_argument("--route", action="store_true", help="pick fusion weights by query type")
     ap.add_argument("--multi-query", type=int, default=0, help="N LLM rewrites, fused (costs a call)")
     ap.add_argument("--hyde", action="store_true", help="embed a hypothetical provision (costs a call)")
+    ap.add_argument("--rewrite", choices=["none", "colloquial", "always"], default="none",
+                    help="LLM rewrites + HyDE; 'colloquial' only for first-person questions")
     ap.add_argument("--mmr-lambda", type=float, help="0..1 relevance/diversity trade-off; omit to disable")
     ap.add_argument("--boost-in-force", action="store_true", help="push omitted sections and repealed acts down")
     ap.add_argument("--parent-context", action="store_true", help="answer from the whole section")
@@ -244,18 +259,32 @@ def add_retrieval_args(ap) -> None:
                     help="look up 'দণ্ডবিধির ধারা ৩০২' directly instead of searching for it")
 
 
+def open_store(index_dir: str | Path):
+    """The vector store an index directory describes: NumpyStore by default, or
+    the Qdrant collection build_index.py --backend qdrant recorded in index.json."""
+    import json
+
+    from .store import NumpyStore, QdrantStore
+
+    info_path = Path(index_dir) / "index.json"
+    info = json.loads(info_path.read_text(encoding="utf-8")) if info_path.exists() else {}
+    if info.get("backend") != "qdrant":
+        return NumpyStore.load(index_dir)
+    return QdrantStore(info["dim"], info.get("collection", "bdlaws"),
+                       url=info.get("url") or "http://localhost:6333", path=info.get("path"),
+                       embedder_name=info.get("embedder", ""))
+
+
 def build_pipeline(config, index_dir: str | Path, embedder, llm=None,
                    records: list[dict] | None = None) -> SearchPipeline:
     """Build from a RetrievalConfig (an argparse namespace is accepted too)."""
-    from .store import NumpyStore
-
     cfg = config if isinstance(config, RetrievalConfig) else RetrievalConfig.from_args(config)
     cfg = replace(cfg, embedder=getattr(embedder, "name", cfg.embedder))
     index_dir = Path(index_dir)
 
     dense = None
     if cfg.mode in ("dense", "hybrid"):
-        store = NumpyStore.load(index_dir)
+        store = open_store(index_dir)
         if embedder.dim != store.dim:
             raise SystemExit(f"index dim {store.dim} ({store.embedder_name}) "
                              f"!= embedder dim {embedder.dim} ({embedder.name}) — rebuild the index")

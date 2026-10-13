@@ -4,14 +4,15 @@ What is still open in this project. What has already been fixed is recorded in [
 
 ## Limitations
 
-- **`QdrantStore` is unverified.** I have not run it against a live Qdrant server. The default `NumpyStore` is what the tests and the reported numbers use.
-- **Scripts still adjust `sys.path`.** The library is an installable package, but the scripts in `scripts/` still insert `src/` into the path so they run without installing. Moving them to console entry points is the clean fix.
-- **Evaluation set size.** 86 held-out questions is enough to compare configurations, not enough to claim tight confidence intervals.
-- **Judge model.** Answer correctness is judged by an LLM. The judge is required to differ from the answering model, but it has not been calibrated against many human labels.
-- **Corpus scope.** Coverage depends on the acts I ingested, so questions about other acts will not be answered well.
+- **Qdrant has only run in embedded mode.** `tests/test_qdrant.py` checks top-k and scores against `NumpyStore` with Qdrant's local mode, which searches exactly. A Qdrant server uses an HNSW index, so its recall against the exact store still needs measuring on the real index.
+- **New retrieval options are not yet measured on the full corpus.** `--rerank-top`, `--rewrite colloquial` and the `[REQUESTED SECTION]` prompt (answer-system/v4) are tested offline; they need a run with bge-m3, a reranker and an answering model to say whether they move the numbers. The ablation has a `dense+rerank@20` row for this.
+- **Evaluation set size.** 86 held-out questions is enough to compare configurations, not enough to claim tight confidence intervals. 16 more are drafted in `data/eval/eval_v2_draft.jsonl` and await review (`data/eval/REVIEW_V2.md`).
+- **Judge model.** Answer correctness is judged by an LLM. The judge is required to differ from the answering model, but it has not been calibrated against human labels.
+- **Corpus scope.** Answers come only from the 1,354 acts ingested. Rules, SROs, gazette notifications and case law are not in the corpus, so questions that depend on them get a partial answer or NOT_FOUND.
 
 ## Next steps
 
-1. Run `QdrantStore` against a local Qdrant and compare its top-k against `NumpyStore` on the same queries.
-2. Turn the scripts into entry points and remove the path adjustment.
-3. Grow the evaluation set and add a human-labelled sample to calibrate the judge.
+1. Run `bdrag ablate --only dense dense+rerank@20` and `bdrag e2e` with the v4 prompt on the full index, and update the README tables.
+2. Review the drafted v2 questions and the `sr02` gold label.
+3. Grade 20 answers with `bdrag calibrate-judge` to get the judge's kappa.
+4. Measure a Qdrant server's HNSW recall against `NumpyStore` on the real index.

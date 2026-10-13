@@ -74,6 +74,13 @@ class TestResolver(unittest.TestCase):
         self.assertEqual(out[0].chunk_id, "11-302")
         self.assertGreaterEqual(out[0].score, out[1].score)
 
+    def test_exact_lookup_is_marked_requested(self):
+        hits = [Hit("24-101", 0.9, "", "", RECORDS[3]["metadata"])]
+        out = apply_reference(hits, Reference([11], ["302"]), self.r)
+        self.assertTrue(out[0].metadata.get("requested"))
+        self.assertFalse(out[1].metadata.get("requested"))
+        self.assertNotIn("requested", RECORDS[0]["metadata"])   # records are not mutated
+
     def test_number_only_promotes_matching_sections(self):
         hits = [Hit("24-101", 0.9, "", "", RECORDS[3]["metadata"]),
                 Hit("99-302", 0.8, "", "", RECORDS[2]["metadata"])]

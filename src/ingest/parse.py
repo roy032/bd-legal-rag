@@ -198,7 +198,7 @@ def _toc(soup: BeautifulSoup, act_id: int) -> list[SectionRef]:
     part = chapter = heading = None
     last_number = ""
     for node in toc.find_all(True):
-        classes = node.get("class") or []
+        classes: list[str] = list(node.get("class") or [])
         if "act-part-group" in classes:
             part = _join_heading(_inline(node.find(class_="act-part-no")),
                                  _inline(node.find(class_="act-part-name")))
@@ -209,8 +209,8 @@ def _toc(soup: BeautifulSoup, act_id: int) -> list[SectionRef]:
             heading = None
         elif "act-section-head" in classes:
             heading = _inline(node) or None
-        elif node.name == "a" and isinstance(node.get("href"), str):
-            m = SECTION_HREF.search(node["href"])
+        elif node.name == "a" and isinstance(href := node.get("href"), str):
+            m = SECTION_HREF.search(href)
             if not m or int(m.group(1)) != act_id:
                 continue
             sid = int(m.group(2))

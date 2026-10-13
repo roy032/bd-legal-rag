@@ -77,7 +77,7 @@ class TestUpdatePlan(unittest.TestCase):
     def test_new_amending_act_marks_its_target_for_refresh(self):
         import importlib.util
         import json
-        spec = importlib.util.spec_from_file_location("ingest_script", ROOT / "scripts" / "ingest.py")
+        spec = importlib.util.spec_from_file_location("ingest_script", ROOT / "src" / "bdrag_tools" / "ingest.py")
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
 

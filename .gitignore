@@ -11,3 +11,4 @@ __pycache__/
 kaggle_upload/
 results/finish.log
 *.egg-info/
+.coverage

@@ -251,9 +251,6 @@ class TestEndpoints(unittest.TestCase):
         self.assertIn("Bangladesh Law Assistant", r.text)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 @unittest.skipUnless(HAVE_STARLETTE, "starlette not installed")
 class TestServiceImprovements(unittest.TestCase):
@@ -353,3 +350,16 @@ class TestServiceImprovements(unittest.TestCase):
     def test_answer_carries_confidence(self):
         body = self.client().post("/ask", json={"question": "হত্যার শাস্তি কী?"}).json()
         self.assertIn(body["confidence"]["label"], ("high", "medium", "low", "none"))
+
+
+class TestAgentRouting(unittest.TestCase):
+    def test_situations_and_comparisons_go_to_the_agent(self):
+        from service.app import wants_agent
+        self.assertTrue(wants_agent("My employer fired me without notice. What can I do?"))
+        self.assertTrue(wants_agent("আমার স্বামী আমাকে মারধর করে, আমি কী করব?"))
+        self.assertTrue(wants_agent("difference between theft and robbery"))
+        self.assertFalse(wants_agent("What does section 302 of the Penal Code say?"))
+
+
+if __name__ == "__main__":
+    unittest.main()

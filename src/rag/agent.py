@@ -68,6 +68,9 @@ Rules:
 - If an excerpt says a term is defined elsewhere, use follow_refs on that excerpt.
 - Quote the words of a provision exactly as they appear, or paraphrase without quotation marks.
 - Answer in the same language as the question.
+- If the question describes a situation, find every provision it needs (the offence or
+  right, the penalty or remedy, and where to complain or apply), then apply them to the
+  facts given and say what the person can do, citing each point.
 - If, after searching, the corpus does not answer the question, reply:
   ANSWER: NOT_FOUND: <what is missing>
 - You have at most {max_steps} actions. Spend them; do not stall."""

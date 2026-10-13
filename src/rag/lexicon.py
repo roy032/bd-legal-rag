@@ -97,6 +97,18 @@ def expand_synonyms(question: str, max_added: int = 6) -> str:
     return f"{question} {' '.join(extras[:max_added])}".strip() if extras else question
 
 
+# First-person, story-shaped questions ("someone threw me out of my land") share
+# little wording with the statute; they are the ones worth an LLM rewrite.
+COLLOQUIAL = re.compile(nfc(
+    r"\b(?:i|me|my|mine|i'm|i've|someone|somebody)\b|আমি|আমার|আমাকে|আমায়|আমাদের|কেউ"),
+    re.IGNORECASE)
+
+
+def is_colloquial(question: str) -> bool:
+    """A personal narrative rather than a question in legal vocabulary."""
+    return bool(COLLOQUIAL.search(question)) and not SECTION_REF.search(question)
+
+
 def classify(question: str) -> str:
     """'exact_ref' | 'comparative' | 'conceptual' — used to pick retrieval weights."""
     if SECTION_REF.search(question):
