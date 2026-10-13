@@ -223,7 +223,7 @@ class QdrantStore:
         qfilter = None
         local: dict[str, Any] = {}
         if filters:
-            must = []
+            must: list[Any] = []
             for key, want in filters.items():
                 if callable(want):
                     local[key] = want      # not expressible server-side: applied below
