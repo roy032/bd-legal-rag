@@ -23,7 +23,7 @@ from test_rag import CORPUS, chunk  # noqa: E402
 EXACT = chunk("e", "The Penal Code, 1860 > Section 304A: Causing death by negligence\n\n"
                    "Whoever causes the death of any person by doing any rash or negligent act...",
               act_id=2, act_title="The Penal Code, 1860", language="en", section_id=304,
-              section_number="304A")
+              section_number="304A", section_number_ascii="304A")
 DOCS = CORPUS + [EXACT]
 
 
@@ -186,6 +186,50 @@ class TestPipeline(unittest.TestCase):
                            reranker=LexicalOverlapReranker())
         hits = p.search("হত্যার শাস্তি মৃত্যুদণ্ড", k=2)
         self.assertEqual(hits[0].chunk_id, "a")
+
+    def test_rerank_top_limits_the_pool(self):
+        seen = []
+
+        class Spy(LexicalOverlapReranker):
+            def rerank(self, query, hits, k):
+                seen.append(len(hits))
+                return super().rerank(query, hits, k)
+
+        p = SearchPipeline(RetrievalConfig(mode="dense", candidates=5, rerank_top=2),
+                           dense=self.dense, reranker=Spy())
+        p.search("হত্যার শাস্তি", k=2)
+        self.assertEqual(seen, [2])
+
+    def test_reranker_keeps_the_requested_section_first(self):
+        class Reverse:
+            name = "reverse"
+
+            def rerank(self, query, hits, k):
+                return list(reversed(hits))[:k]
+
+        p = SearchPipeline(RetrievalConfig(mode="dense", candidates=5, resolve_refs=True),
+                           dense=self.dense, reranker=Reverse())
+        hits = p.search("Penal Code section 304A", k=3)
+        self.assertEqual(hits[0].chunk_id, "e")
+        self.assertTrue(hits[0].metadata.get("requested"))
+
+    def test_rewrite_fires_only_for_colloquial_questions(self):
+        calls = []
+
+        def fake_llm(system, prompt):
+            calls.append(prompt)
+            return "dispossession of immovable property"
+
+        p = SearchPipeline(RetrievalConfig(mode="dense", rewrite="colloquial"), dense=self.dense,
+                           llm=fake_llm)
+        p.search("What is the punishment for murder?", k=2)
+        self.assertEqual(calls, [])
+        queries = p.queries("Someone threw me out of my land. Can I get it back?")
+        self.assertEqual(len(calls), 2)                   # one rewrite call, one HyDE call
+        self.assertIn("dispossession of immovable property", queries)
+        self.assertEqual(SearchPipeline(RetrievalConfig(mode="dense", rewrite="colloquial"),
+                                        dense=self.dense).queries("আমার জমি দখল করেছে"),
+                         ["আমার জমি দখল করেছে"])          # no model, no rewrite
 
     def test_multi_query_uses_the_llm_and_fuses(self):
         calls = []

@@ -134,6 +134,9 @@ class ServiceConfig:
         retrieval = RetrievalConfig(
             mode=_env_str("BDRAG_MODE", "dense"),
             rerank=_env_str("BDRAG_RERANK", "none"),
+            rerank_model=_env_str("BDRAG_RERANK_MODEL", "BAAI/bge-reranker-v2-m3"),
+            rerank_top=_env_int("BDRAG_RERANK_TOP", 20),
+            rewrite=_env_str("BDRAG_REWRITE", "none"),
             expand_refs=_env_bool("BDRAG_EXPAND_REFS", True),
             synonyms=_env_bool("BDRAG_SYNONYMS", True),
             transliterate=_env_bool("BDRAG_TRANSLITERATE", True),

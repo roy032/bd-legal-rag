@@ -57,6 +57,11 @@ SWEEP: dict[str, dict] = {
     "+resolve":          _X,
     "+in-force":         _F,      # = the service's default pipeline
     "+rerank":           {**_F, "rerank": "cross"},
+    # The served candidate: the reranker on top of dense (which won), and only
+    # over the top 20 so a CPU answers in seconds rather than minutes.
+    "dense+rerank@20":   {"mode": "dense", "expand_refs": True, "max_parts_per_section": 2,
+                          "synonyms": True, "transliterate": True, "resolve_refs": True,
+                          "boost_in_force": True, "rerank": "cross", "rerank_top": 20},
 }
 
 

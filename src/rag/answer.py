@@ -93,6 +93,8 @@ def format_context(hits: list[Hit], max_chars: int = 1500) -> str:
             head += f" — {m['section_title']}"
         if m.get("chapter"):
             head += f" ({m['chapter']})"
+        if m.get("requested"):
+            head += " [REQUESTED SECTION]"
         if m.get("amended"):
             head += " [amended]"
         if m.get("repealed"):
@@ -109,8 +111,11 @@ def reorder_sandwich(hits: list[Hit]) -> list[Hit]:
     ('lost in the middle'). Make this a flag, then measure whether it
     actually helps on your evaluation set — don't take it on faith.
     """
+    # The section the question names always stays first, in its own order.
+    requested = [h for h in hits if h.metadata.get("requested")]
+    rest = [h for h in hits if not h.metadata.get("requested")]
     # hits come in ranked order: [1,2,3,4,5] -> [1,3,5,4,2]
-    return list(hits[0::2]) + list(hits[1::2])[::-1]
+    return requested + list(rest[0::2]) + list(rest[1::2])[::-1]
 
 
 def build_prompt(question: str, hits: list[Hit], sandwich: bool = True) -> str:
