@@ -117,3 +117,81 @@ class TestOllamaHost(unittest.TestCase):
         self.assertEqual(ollama_host(), "http://127.0.0.1:11434")
         os.environ["OLLAMA_HOST"] = "https://ollama.example.com/"
         self.assertEqual(ollama_host(), "https://ollama.example.com")
+
+
+class TestOpenAICompatible(unittest.TestCase):
+    """Free options over the OpenAI chat-completions protocol, without a vendor SDK."""
+
+    ENV = ("RAG_LLM_BASE_URL", "RAG_LLM_API_KEY", "RAG_MODEL", "GROQ_API_KEY")
+
+    def setUp(self):
+        self._saved = {k: os.environ.pop(k, None) for k in self.ENV}
+
+    def tearDown(self):
+        for k, v in self._saved.items():
+            os.environ.pop(k, None)
+            if v is not None:
+                os.environ[k] = v
+
+    def test_presets_and_overrides(self):
+        from rag.llm import compat_settings
+        os.environ["GROQ_API_KEY"] = "gk"
+        self.assertEqual(compat_settings("groq"),
+                         ("https://api.groq.com/openai/v1", "gk", "llama-3.3-70b-versatile"))
+        os.environ["RAG_LLM_BASE_URL"] = "http://proxy.local/v1/"
+        os.environ["RAG_MODEL"] = "qwen3-32b"
+        self.assertEqual(compat_settings("groq"), ("http://proxy.local/v1", "gk", "qwen3-32b"))
+
+    def test_hosted_preset_without_key_says_which_variable(self):
+        from rag.llm import compat_settings
+        with self.assertRaisesRegex(ValueError, "GROQ_API_KEY"):
+            compat_settings("groq")
+
+    def test_local_server_needs_a_model_but_no_key(self):
+        from rag.llm import compat_settings
+        with self.assertRaisesRegex(ValueError, "RAG_MODEL"):
+            compat_settings("compat")
+        os.environ["RAG_MODEL"] = "local"
+        self.assertEqual(compat_settings("compat"), ("http://127.0.0.1:8080/v1", "", "local"))
+
+    def _response(self, status=200, payload=None, lines=()):
+        resp = mock.MagicMock(status_code=status, text=json.dumps(payload or {}))
+        resp.json.return_value = payload or {}
+        resp.iter_lines.return_value = list(lines)
+        resp.__enter__.return_value = resp
+        return resp
+
+    def test_call_sends_chat_completion_and_strips_thinking(self):
+        from rag.llm import get_llm
+        os.environ["GROQ_API_KEY"] = "gk"
+        reply = {"choices": [{"message": {"content": "<think>hmm</think>\nধারা ৩০২ [1]"}}]}
+        with mock.patch("requests.post", return_value=self._response(payload=reply)) as post:
+            text = get_llm("groq", retries=0)("SYS", "Q")
+        self.assertEqual(text, "ধারা ৩০২ [1]")
+        url, kw = post.call_args[0][0], post.call_args[1]
+        self.assertEqual(url, "https://api.groq.com/openai/v1/chat/completions")
+        self.assertEqual(kw["headers"]["authorization"], "Bearer gk")
+        self.assertEqual(kw["json"]["messages"][0], {"role": "system", "content": "SYS"})
+        self.assertEqual(kw["json"]["temperature"], 0)
+
+    def test_http_error_becomes_llm_error(self):
+        from rag.llm import LLMError, get_llm
+        os.environ["RAG_MODEL"] = "m"
+        with mock.patch("requests.post", return_value=self._response(401, {"error": "bad key"})), \
+                self.assertRaisesRegex(LLMError, "401"):
+            get_llm("compat", retries=0)("s", "p")
+
+    def test_stream_yields_answer_text_without_thinking(self):
+        from rag.llm import get_stream_llm
+
+        def sse(text):
+            return "data: " + json.dumps({"choices": [{"delta": {"content": text}}]})
+        lines = [sse("<thi"), sse("nk>plan"), sse("</think>\n\nউত্তর"), "", sse(" [1]"),
+                 "data: [DONE]"]
+        os.environ["RAG_MODEL"] = "m"
+        with mock.patch("requests.post", return_value=self._response(lines=lines)):
+            out = "".join(get_stream_llm("compat")("s", "p"))
+        self.assertEqual(out, "উত্তর [1]")
+        lines = [sse("Hi"), sse(" there")]
+        with mock.patch("requests.post", return_value=self._response(lines=lines)):
+            self.assertEqual("".join(get_stream_llm("compat")("s", "p")), "Hi there")
