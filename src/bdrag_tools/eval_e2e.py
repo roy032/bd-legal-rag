@@ -118,7 +118,10 @@ def main() -> None:
                         "failures": ans.failures, "repaired": ans.repaired,
                         "abstained": ans.abstained, "llm_calls": ans.llm_calls,
                         "trace": ans.checks.get("trace"), "stop_reason": ans.checks.get("stop_reason"),
-                        "judge": {k: v for k, v in row.items() if k.startswith("_")}})
+                        # The verdicts themselves, not only the reasons: calibrate_judge
+                        # compares them with a human's labels.
+                        "judge": {k: v for k, v in row.items()
+                                  if k.startswith("_") or k in ("faithfulness", "correctness")}})
         print(f"[{n}/{len(items)}{'.' + str(repeat) if args.repeats > 1 else ''}] {it.id} "
               f"{'REFUSED' if ans.refused else 'answered'} "
               f"faith={row.get('faithfulness', '-')} corr={row.get('correctness', '-')}")
