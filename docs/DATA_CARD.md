@@ -49,7 +49,9 @@ URL, character length.
   also, accidentally, a date filter. Report per-language results with that in mind.
 - **No case law, rules (বিধিমালা), SROs or gazette notifications.** Many practical
   questions are answered by those, not by the parent Act.
-- **Scanned-image acts are absent** — no OCR step exists.
+- **Scanned-image acts are absent from the scraped corpus.** `scripts/ingest_pdf.py`
+  can add them (Tesseract `ben+eng`), with `ocr: true` and the page in each chunk's
+  metadata; OCR misreads digits now and then (৪ as 8), which can merge two sections.
 - **Tables inside sections are flattened** to text and read poorly.
 
 ## Appropriate use
