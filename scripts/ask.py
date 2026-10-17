@@ -61,7 +61,7 @@ def main() -> None:
     ap.add_argument("--embedder", choices=["auto", "st", "hashing"], default="auto",
                     help="auto = the embedder the index was built with")
     ap.add_argument("--model", default="BAAI/bge-m3")
-    ap.add_argument("--provider", help="anthropic | openai | ollama | echo (default: $RAG_LLM)")
+    ap.add_argument("--provider", help="ollama | compat | groq | gemini | hf | anthropic | openai | echo (default: $RAG_LLM)")
     ap.add_argument("--llm-model", help="override $RAG_MODEL")
     ap.add_argument("-k", type=int, default=5)
     ap.add_argument("--language", choices=["bn", "en"], help="restrict to acts in this language")

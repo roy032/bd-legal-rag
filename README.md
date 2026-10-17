@@ -55,7 +55,7 @@ An agent mode sits alongside the single-shot path: the model calls `search`,
 
 ```bash
 pip install -e ".[serve]"     # or: make install
-make test                     # 258 tests, all offline — no API key, no model download
+make test                     # 264 tests, all offline — no API key, no model download
 make demo                     # full pipeline + ablation on the bundled sample corpus
 make serve                    # API + UI on :8000
 ```
@@ -65,22 +65,35 @@ Then on real data:
 ```bash
 python scripts/ingest.py --year-from 2000 --limit 30     # scrape, parse, chunk
 python scripts/build_index.py --bm25                     # dense + lexical indexes
-export RAG_LLM=anthropic ANTHROPIC_API_KEY=sk-...        # or openai, or ollama (free)
+export RAG_LLM=ollama RAG_MODEL=qwen2.5:7b               # free; see below for other options
 python scripts/ask.py --mode dense --expand-refs --resolve-refs "ধারা ৩০২ কী বলে?"
 make serve                                               # API + UI on :8000
 ```
 
-For generated answers, choose one provider before starting the service:
+For generated answers, choose one provider before starting the service. The free ones
+come first; none of them needs a vendor SDK.
 
 ```bash
-# Hosted providers
+# Local Ollama: free, no key, nothing leaves the machine (pull a model first).
+# gemma4:e4b wrote the best Bangla of the small models tried on the scenario questions.
+ollama pull gemma4:e4b
+RAG_LLM=ollama RAG_MODEL=gemma4:e4b OLLAMA_HOST=http://127.0.0.1:11434 make serve
+
+# Any OpenAI-compatible local server (llama.cpp, LM Studio, vLLM)
+RAG_LLM=compat RAG_LLM_BASE_URL=http://127.0.0.1:8080/v1 RAG_MODEL=<model> make serve
+
+# Free-tier hosts: a free key from the provider, rate limited
+RAG_LLM=groq   GROQ_API_KEY=...   make serve   # default llama-3.3-70b-versatile
+RAG_LLM=gemini GEMINI_API_KEY=... make serve   # default gemini-flash-latest
+RAG_LLM=hf     HF_TOKEN=...       make serve   # default Qwen/Qwen2.5-72B-Instruct
+
+# Paid hosted providers
 RAG_LLM=openai RAG_MODEL=gpt-4o-mini OPENAI_API_KEY=sk-... make serve
 RAG_LLM=anthropic RAG_MODEL=claude-sonnet-4-5 ANTHROPIC_API_KEY=sk-... make serve
-
-# Local Ollama (start Ollama and pull a model first)
-ollama pull qwen2.5:7b
-RAG_LLM=ollama RAG_MODEL=qwen2.5:7b OLLAMA_HOST=http://127.0.0.1:11434 make serve
 ```
+
+`RAG_MODEL` overrides any default; free-tier rosters change, so check the provider's model
+list if one is refused. Free-tier hosts receive the question and the retrieved excerpts.
 
 Without a provider, the service returns retrieved provisions with HTTP 503 instead of
 presenting an offline stub as a generated answer. Set `RAG_LLM=echo` explicitly when

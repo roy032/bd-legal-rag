@@ -1,7 +1,14 @@
 """Thin LLM wrapper so the rest of the code never imports a vendor SDK.
 
-Pick with RAG_LLM=anthropic|openai|ollama|echo and RAG_MODEL=<model id>.
-'echo' is an offline stub used by the tests.
+Pick with RAG_LLM=<provider> and RAG_MODEL=<model id>:
+
+  ollama                      local Ollama (free, no key)
+  compat                      any OpenAI-compatible server: RAG_LLM_BASE_URL, optional
+                              RAG_LLM_API_KEY (llama.cpp server, LM Studio, vLLM, ...)
+  groq | gemini | hf          free-tier hosts over the same protocol; each reads its own key
+  anthropic | openai          paid hosted APIs (vendor SDKs)
+  echo                        offline stub used by the tests; the service then returns
+                              the retrieved provisions without a generated answer
 """
 from __future__ import annotations
 
@@ -9,6 +16,7 @@ import os
 import random
 import time
 from collections.abc import Callable, Iterator
+from functools import partial
 
 LLM = Callable[[str, str], str]           # (system, user_prompt) -> text
 StreamLLM = Callable[[str, str], "Iterator[str]"]  # (system, user_prompt) -> text chunks
@@ -127,6 +135,76 @@ def ollama_llm(model: str | None = None, host: str | None = None,
     return call
 
 
+# ------------------------------------------------------- OpenAI-compatible
+# Most free options speak the OpenAI chat-completions protocol: local servers
+# (llama.cpp, LM Studio, vLLM, Ollama's /v1) and free-tier hosts. Plain HTTP via
+# `requests`, so none of them needs a vendor SDK.
+
+# provider: (base URL, env var holding the key, default model). Free-tier model
+# rosters change often; RAG_MODEL overrides the default.
+COMPAT_HOSTS: dict[str, tuple[str, str, str]] = {
+    "groq": ("https://api.groq.com/openai/v1", "GROQ_API_KEY", "llama-3.3-70b-versatile"),
+    "gemini": ("https://generativelanguage.googleapis.com/v1beta/openai", "GEMINI_API_KEY",
+               "gemini-flash-latest"),
+    "hf": ("https://router.huggingface.co/v1", "HF_TOKEN", "Qwen/Qwen2.5-72B-Instruct"),
+    "compat": ("http://127.0.0.1:8080/v1", "RAG_LLM_API_KEY", ""),
+}
+
+
+def compat_settings(provider: str = "compat", model: str | None = None) -> tuple[str, str, str]:
+    """(base_url, api_key, model) for an OpenAI-compatible provider.
+
+    RAG_LLM_BASE_URL and RAG_LLM_API_KEY override any preset, so a proxy or a
+    different region needs no code change.
+    """
+    base, key_var, default_model = COMPAT_HOSTS[provider]
+    base = (os.environ.get("RAG_LLM_BASE_URL") or base).strip().rstrip("/")
+    key = (os.environ.get("RAG_LLM_API_KEY") or os.environ.get(key_var) or "").strip()
+    model = model or os.environ.get("RAG_MODEL") or default_model
+    if not model:
+        raise ValueError(f"set RAG_MODEL for RAG_LLM={provider}")
+    if provider != "compat" and not key:
+        raise ValueError(f"RAG_LLM={provider} needs {key_var} (free key from the provider)")
+    return base, key, model
+
+
+def _compat_request(base: str, key: str, model: str, system: str, prompt: str,
+                    stream: bool) -> tuple[str, dict, dict]:
+    headers = {"content-type": "application/json"}
+    if key:
+        headers["authorization"] = f"Bearer {key}"
+    body = {"model": model, "temperature": 0, "max_tokens": DEFAULT_MAX_TOKENS,
+            "stream": stream,
+            "messages": [{"role": "system", "content": system},
+                         {"role": "user", "content": prompt}]}
+    return f"{base}/chat/completions", headers, body
+
+
+def strip_thinking(text: str) -> str:
+    """Drop a <think>...</think> block that reasoning models put before the answer."""
+    if "</think>" in text:
+        return text.split("</think>", 1)[1].lstrip()
+    return text
+
+
+def compat_llm(provider: str = "compat", model: str | None = None,
+               timeout_s: float = DEFAULT_TIMEOUT_S) -> LLM:
+    import requests
+
+    base, key, model = compat_settings(provider, model)
+
+    def call(system: str, prompt: str) -> str:
+        url, headers, body = _compat_request(base, key, model, system, prompt, stream=False)
+        r = requests.post(url, headers=headers, json=body, timeout=timeout_s)
+        if r.status_code >= 400:          # the body says why: bad key, unknown model, quota
+            raise RuntimeError(f"{provider} HTTP {r.status_code} for model {model!r}: "
+                               f"{r.text[:300]}")
+        choices = r.json().get("choices") or [{}]
+        return strip_thinking(choices[0].get("message", {}).get("content") or "")
+
+    return call
+
+
 def echo_llm() -> LLM:
     def call(system: str, prompt: str) -> str:
         return "[offline stub] no model configured — set RAG_LLM and an API key."
@@ -137,10 +215,11 @@ def echo_llm() -> LLM:
 def get_llm(provider: str | None = None, model: str | None = None,
             retries: int = DEFAULT_RETRIES) -> LLM:
     provider = (provider or os.environ.get("RAG_LLM", "echo")).lower()
-    builders = {
+    builders: dict[str, Callable[[], LLM]] = {
         "anthropic": lambda: anthropic_llm(model),
         "openai": lambda: openai_llm(model),
         "ollama": lambda: ollama_llm(model),
+        **{name: partial(compat_llm, name, model) for name in COMPAT_HOSTS},
         "echo": echo_llm,
     }
     if provider not in builders:
@@ -255,6 +334,56 @@ def ollama_stream(model: str | None = None, host: str | None = None,
     return call
 
 
+def compat_stream(provider: str = "compat", model: str | None = None,
+                  timeout_s: float = DEFAULT_TIMEOUT_S) -> StreamLLM:
+    import json as _json
+
+    import requests
+
+    base, key, model = compat_settings(provider, model)
+
+    def call(system: str, prompt: str) -> Iterator[str]:
+        url, headers, body = _compat_request(base, key, model, system, prompt, stream=True)
+        held = ""          # text that may still turn out to be a <think> block
+        thinking = None    # None: not decided yet
+        try:
+            with requests.post(url, headers=headers, json=body, stream=True,
+                               timeout=(10, timeout_s)) as r:
+                if r.status_code >= 400:
+                    raise LLMError(f"{provider} HTTP {r.status_code} for model {model!r}: "
+                                   f"{r.text[:300]}")
+                for raw in r.iter_lines():
+                    line = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        break
+                    choices = _json.loads(data).get("choices") or [{}]
+                    piece = (choices[0].get("delta") or {}).get("content")
+                    if not piece:
+                        continue
+                    if thinking is False:
+                        yield piece
+                        continue
+                    held += piece
+                    if thinking is None and len(held.lstrip()) >= 7:
+                        thinking = held.lstrip().startswith("<think>")
+                    if thinking is False:
+                        yield held
+                    elif thinking and "</think>" in held:
+                        rest = strip_thinking(held)
+                        thinking = False
+                        if rest:
+                            yield rest
+                if held and thinking is None:      # a reply shorter than "<think>"
+                    yield held
+        except requests.RequestException as e:
+            raise LLMError(f"{provider} unreachable at {base}: {e}") from e
+
+    return call
+
+
 def echo_stream() -> StreamLLM:
     def call(system: str, prompt: str) -> Iterator[str]:
         for word in echo_llm()(system, prompt).split():
@@ -268,8 +397,10 @@ def get_stream_llm(provider: str | None = None, model: str | None = None) -> Str
     """Streaming counterpart of get_llm. Falls back to one chunk if a provider
     has no streaming implementation, so callers never need to branch."""
     provider = (provider or os.environ.get("RAG_LLM", "echo")).lower()
-    builders = {"anthropic": lambda: anthropic_stream(model), "openai": lambda: openai_stream(model),
-                "ollama": lambda: ollama_stream(model), "echo": echo_stream}
+    builders: dict[str, Callable[[], StreamLLM]] = {
+        "anthropic": lambda: anthropic_stream(model), "openai": lambda: openai_stream(model),
+        "ollama": lambda: ollama_stream(model), "echo": echo_stream,
+        **{name: partial(compat_stream, name, model) for name in COMPAT_HOSTS}}
     if provider in builders:
         return builders[provider]()
     plain = get_llm(provider, model)
