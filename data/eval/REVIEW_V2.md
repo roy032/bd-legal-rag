@@ -27,3 +27,13 @@ sections as gold.
 `bdrag calibrate-judge results/<run>.answers.json --sample 20` asks you to grade 20
 answers yourself and then reports Cohen's kappa against the LLM judge. It needs a
 human; nothing here can stand in for that.
+
+## Scenario set
+
+`eval_scenarios.jsonl` holds 8 situation questions ("my landlord...", "my employer has
+not paid me...") taken from the free-model run of 2026-10-16, where retrieval missed the
+governing sections. Gold ids were read off bdlaws.minlaw.gov.bd and checked against the
+section text. Report it on its own, next to `eval.jsonl`:
+
+    bdrag eval --eval data/eval/eval_scenarios.jsonl --mode dense --expand-refs \
+        --synonyms --transliterate --resolve-refs --boost-in-force -k 5
