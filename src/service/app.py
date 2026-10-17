@@ -112,6 +112,9 @@ class ServiceConfig:
     max_steps: int = 5
     provider: str | None = None
     llm_model: str = ""
+    # Answering models a visitor may pick in the UI, "provider:model", default first:
+    # BDRAG_MODELS="ollama:gemma4:e4b,groq:llama-3.3-70b-versatile". Empty = RAG_LLM only.
+    models: list[str] = field(default_factory=list)
     cache_ttl_s: float = 1800
     cache_size: int = 512
     rate_per_min: float = 20
@@ -168,6 +171,7 @@ class ServiceConfig:
             max_steps=_env_int("BDRAG_MAX_STEPS", 5),
             provider=os.environ.get("RAG_LLM", "").strip() or None,
             llm_model=_env_str("RAG_MODEL", ""),
+            models=[m.strip() for m in _env_str("BDRAG_MODELS", "").split(",") if m.strip()],
             cache_ttl_s=_env_float("BDRAG_CACHE_TTL", 1800.0) or 0.0,
             rate_per_min=_env_float("BDRAG_RATE_PER_MIN", 20.0) or 20.0,
             api_keys=keys,
@@ -250,6 +254,34 @@ def wants_agent(question: str) -> bool:
             or classify_request(question)["advice"])
 
 
+LOCAL_PROVIDERS = ("ollama", "compat", "echo")
+
+
+def split_model(spec: str) -> tuple[str, str]:
+    """"groq:openai/gpt-oss-120b" -> ("groq", "openai/gpt-oss-120b"); the model may hold ':'."""
+    provider, _, model = spec.partition(":")
+    return provider.strip().lower(), model.strip()
+
+
+def model_options(cfg: ServiceConfig) -> list[dict]:
+    """What the UI's model picker offers. Hosted entries without a key are left out."""
+    from rag.llm import COMPAT_HOSTS, compat_settings
+
+    specs = cfg.models or [f"{cfg.provider or 'echo'}:{cfg.llm_model}"]
+    out = []
+    for spec in specs:
+        provider, model = split_model(spec)
+        if provider in COMPAT_HOSTS and provider != "compat":
+            try:
+                compat_settings(provider, model or None)
+            except ValueError:                   # no key for this host: don't offer it
+                continue
+        local = provider in LOCAL_PROVIDERS
+        out.append({"id": spec, "provider": provider, "model": model or None, "local": local,
+                    "label": f"{model or provider} ({'on this machine' if local else provider})"})
+    return out
+
+
 def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
                stream_llm=None, records=None) -> Starlette:
     """Build the app. Components can be injected, which is what the tests do —
@@ -283,8 +315,9 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
 
         embedder = embedder_for(cfg.retrieval.mode, cfg.embedder, cfg.model, cfg.index)
         state["records"] = state["records"] or load_records(cfg.index, cfg.chunks)
-        state["llm"] = state["llm"] or get_llm(cfg.provider)
-        state["stream_llm"] = state["stream_llm"] or get_stream_llm(cfg.provider)
+        provider, model = split_model(cfg.models[0]) if cfg.models else (cfg.provider, "")
+        state["llm"] = state["llm"] or get_llm(provider, model or None)
+        state["stream_llm"] = state["stream_llm"] or get_stream_llm(provider, model or None)
         state["pipeline"] = build_pipeline(cfg.retrieval, cfg.index, embedder,
                                            llm=state["llm"], records=state["records"])
         state["fingerprint"] = index_fingerprint(cfg.index)
@@ -318,6 +351,28 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
             "ts": time.time(), "id": answer_id, "client": client, "question": ans.question,
             "agent": use_agent, "refused": ans.refused, "failures": ans.failures,
             "sources": [s["chunk_id"] for s in ans.sources], "latency_s": round(ans.latency_s, 2)})
+
+    def pick_model(body: dict):
+        """(llm, stream_llm, id) for the model the request asks for; None = unknown model."""
+        wanted = (body.get("model") or "").strip()
+        default = cfg.models[0] if cfg.models else ""
+        if not wanted or wanted == default:
+            return state["llm"], state["stream_llm"], default
+        if wanted not in cfg.models:
+            return None
+        built = state.setdefault("models", {})
+        if wanted not in built:
+            from rag.llm import get_llm, get_stream_llm
+
+            provider, model = split_model(wanted)
+            built[wanted] = (get_llm(provider, model or None),
+                             get_stream_llm(provider, model or None))
+        return (*built[wanted], wanted)
+
+    async def models(request: Request):
+        options = model_options(cfg)
+        return JSONResponse({"models": options,
+                             "default": options[0]["id"] if options else None})
 
     async def payload(request: Request) -> dict:
         try:
@@ -492,11 +547,16 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         await run_in_threadpool(build)
         trace: Trace = request.state.trace
         k = clamp_k(body.get("k"))
-        if getattr(state["llm"], "offline_stub", False):
+        if (picked := pick_model(body)) is None:
+            return JSONResponse({"error": "unknown model; GET /models lists the choices"},
+                                status_code=400)
+        llm, _, model_id = picked
+        if getattr(llm, "offline_stub", False):
             return await degraded_retrieval(question, k)
         use_agent = cfg.agent_enabled and (bool(body.get("agent")) or
                                            (cfg.agent_auto and wants_agent(question)))
         key = cache_key(question, k=k, agent=use_agent, language=body.get("language"),
+                        model=model_id,
                         fingerprint=state["fingerprint"], retrieval=cfg.retrieval.to_dict(),
                         min_score=cfg.min_score)
         if (hit := answers.get(key)) is not None:
@@ -505,8 +565,12 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
 
         def work():
             if use_agent:
-                return agent().run(question)
-            return answer_question(question, state["pipeline"], state["llm"], k=k,
+                if llm is state["llm"]:
+                    return agent().run(question)
+                return LegalAgent(state["pipeline"], state["records"] or [], llm,
+                                  AgentConfig(max_steps=cfg.max_steps, per_call_k=cfg.k,
+                                              guard=guard(), seed=True)).run(question)
+            return answer_question(question, state["pipeline"], llm, k=k,
                                    guard=guard(), language=body.get("language"))
 
         t0 = time.perf_counter()
@@ -556,7 +620,11 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
             return JSONResponse({"error": "question is required"}, status_code=400)
         await run_in_threadpool(build)
         k = clamp_k(body.get("k"))
-        if getattr(state["stream_llm"], "offline_stub", False):
+        if (picked := pick_model(body)) is None:
+            return JSONResponse({"error": "unknown model; GET /models lists the choices"},
+                                status_code=400)
+        llm, stream_llm, _ = picked
+        if getattr(stream_llm, "offline_stub", False):
             return await degraded_retrieval(question, k)
 
         def sse(event: str, data: dict) -> str:
@@ -565,8 +633,8 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         def events():
             try:
                 for item in answer_question_stream(
-                        question, state["pipeline"], state["stream_llm"], k=k, guard=guard(),
-                        repair_llm=state["llm"], language=body.get("language")):
+                        question, state["pipeline"], stream_llm, k=k, guard=guard(),
+                        repair_llm=llm, language=body.get("language")):
                     kind = item["type"]
                     if kind == "final":
                         ans = item["answer"]
@@ -633,6 +701,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         Route("/", index_page),
         Route("/health", health),
         Route("/stats", stats),
+        Route("/models", models),
         Route("/metrics", metrics_endpoint),
         Route("/search", search, methods=["POST"]),
         Route("/ask", ask, methods=["POST"]),

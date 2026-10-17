@@ -124,3 +124,18 @@ class TestOllamaSpeed(unittest.TestCase):
 
         h = Hit("1:1", 1.0, "x" * 3000, "x" * 3000, {"act_title": "A", "section_number": "1"})
         self.assertLess(len(format_context([h], max_chars=500)), 600)
+
+
+class TestAmendmentLabel(unittest.TestCase):
+    def test_latest_year_from_footnotes(self):
+        from rag.answer import amendment_label, source_card
+
+        self.assertIsNone(amendment_label({"amended": False}))
+        self.assertEqual(amendment_label({"amended": True}), "amended")
+        meta = {"amended": True, "footnotes": [
+            "১ দফা (ঙ) বীমা (সংশোধন) আইন, ২০১৯ দ্বারা প্রতিস্থাপিত।",
+            "2 Substituted by the Insurance (Amendment) Act, 2012 (Act No. V of 2012)"]}
+        self.assertEqual(amendment_label(meta), "amended (latest 2019)")
+        card = source_card(1, Hit("1:1", 0.5, "t", "body", {**meta, "url": "u", "act_title": "A"}))
+        self.assertEqual((card["amended"], card["text"], card["repealed"]),
+                         ("amended (latest 2019)", "body", False))

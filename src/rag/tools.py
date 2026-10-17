@@ -23,6 +23,7 @@ from typing import Any, ClassVar, cast
 
 from ingest.textutils import bn_to_ascii_digits
 
+from .answer import amendment_label
 from .store import Hit
 
 
@@ -58,8 +59,8 @@ class EvidenceBook:
                 head += f" (act_id {h.metadata['act_id']})"
             if h.metadata.get("section_title"):
                 head += f" — {h.metadata['section_title']}"
-            if h.metadata.get("amended"):
-                head += " [amended]"
+            if (label := amendment_label(h.metadata)):
+                head += f" [{label}]"
             if h.metadata.get("repealed"):
                 head += " [REPEALED ACT]"
             refs = h.metadata.get("refs") or []

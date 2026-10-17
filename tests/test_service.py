@@ -297,6 +297,28 @@ class TestServiceImprovements(unittest.TestCase):
         self.assertTrue(r.json()["degraded"])
         self.assertTrue(r.json()["sources"])
 
+    def test_model_picker(self):
+        from unittest import mock
+
+        big = lambda system, prompt: "বড় মডেলের উত্তর [1]।"          # noqa: E731
+        c = self.client(models=["ollama:gemma4:e4b", "groq:llama-3.3-70b-versatile"])
+        with mock.patch.dict("os.environ", {"GROQ_API_KEY": "k"}):
+            listed = c.get("/models").json()
+        self.assertEqual(listed["default"], "ollama:gemma4:e4b")
+        self.assertEqual([m["local"] for m in listed["models"]], [True, False])
+        with mock.patch.dict("os.environ", {}, clear=False):
+            import os
+            os.environ.pop("GROQ_API_KEY", None)
+            self.assertEqual(len(c.get("/models").json()["models"]), 1)   # no key, not offered
+
+        q = {"question": "হত্যার শাস্তি কী?"}
+        self.assertIn("মৃত্যুদণ্ড", c.post("/ask", json=q).json()["answer"])
+        with mock.patch("rag.llm.get_llm", return_value=big), \
+                mock.patch("rag.llm.get_stream_llm", return_value=lambda s, p: iter(["x"])):
+            r = c.post("/ask", json={**q, "model": "groq:llama-3.3-70b-versatile"})
+        self.assertIn("বড় মডেলের", r.json()["answer"])                  # not served from cache
+        self.assertEqual(c.post("/ask", json={**q, "model": "groq:anything"}).status_code, 400)
+
     def test_api_key_required_when_configured(self):
         c = self.client(api_keys={"secret": 60}, require_api_key=True)
         self.assertEqual(c.post("/ask", json={"question": "কী?"}).status_code, 401)

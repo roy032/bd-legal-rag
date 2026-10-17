@@ -78,11 +78,35 @@ class Answer:
 
     @property
     def sources(self) -> list[dict]:
-        return [
-            {"n": n, "citation": h.citation, "chunk_id": h.chunk_id,
-             "url": h.metadata.get("url"), "score": round(h.score, 4)}
-            for n, h in enumerate(self.hits, 1) if n in self.cited
-        ]
+        return [{**source_card(n, h), "chunk_id": h.chunk_id}
+                for n, h in enumerate(self.hits, 1) if n in self.cited]
+
+
+_YEAR = re.compile(r"(?<![0-9০-৯])([12০১২][0-9০-৯]{3})(?![0-9০-৯])")
+
+
+def amendment_label(metadata: dict) -> str | None:
+    """"amended (latest 2019)" from a section's footnotes; "amended" when they name no year.
+
+    bdlaws prints each change as a footnote naming the amending act ("বীমা (সংশোধন)
+    আইন, ২০১৯ দ্বারা প্রতিস্থাপিত"), so the latest year there is the newest change
+    this copy of the text reflects. None for a section never amended.
+    """
+    if not metadata.get("amended"):
+        return None
+    years = [int(bn_to_ascii_digits(y)) for note in metadata.get("footnotes") or []
+             for y in _YEAR.findall(note)]
+    years = [y for y in years if 1800 <= y <= 2100]
+    return f"amended (latest {max(years)})" if years else "amended"
+
+
+def source_card(n: int, h: Hit, max_chars: int = 1200) -> dict:
+    """What the UI shows for one excerpt: enough to read it without leaving the page."""
+    m = h.metadata
+    return {"n": n, "citation": h.citation, "url": m.get("url"), "score": round(h.score, 4),
+            "section_title": m.get("section_title"), "act_title": m.get("act_title"),
+            "amended": amendment_label(m), "repealed": bool(m.get("repealed")),
+            "text": h.body[:max_chars]}
 
 
 # Characters of each excerpt the model sees. On a CPU, reading the prompt is most
@@ -103,8 +127,8 @@ def format_context(hits: list[Hit], max_chars: int | None = None) -> str:
             head += f" ({m['chapter']})"
         if m.get("requested"):
             head += " [REQUESTED SECTION]"
-        if m.get("amended"):
-            head += " [amended]"
+        if (label := amendment_label(m)):
+            head += f" [{label}]"
         if m.get("repealed"):
             head += " [REPEALED ACT]"
         body = h.body[:max_chars]
@@ -196,10 +220,7 @@ def answer_question_stream(question: str, retriever, stream_llm, k: int = 5,
         return
 
     ordered = reorder_sandwich(hits) if sandwich and len(hits) > 2 else hits
-    yield {"type": "sources", "sources": [
-        {"n": n, "citation": h.citation, "url": h.metadata.get("url"),
-         "score": round(h.score, 4), "section_title": h.metadata.get("section_title")}
-        for n, h in enumerate(ordered, 1)]}
+    yield {"type": "sources", "sources": [source_card(n, h) for n, h in enumerate(ordered, 1)]}
 
     yield {"type": "status", "stage": "answering"}
     prompt = build_prompt(question, ordered, sandwich=False)
