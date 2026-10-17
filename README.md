@@ -113,6 +113,22 @@ RAG_LLM=ollama RAG_MODEL=gemma4:e4b bdrag serve         # http://localhost:8000
 (Ollama running and the model pulled, or the hosted provider's key present) and
 OCR, and prints the command that fixes each failure.
 
+### Options worth knowing on a laptop
+
+| Setting | What it does |
+|---|---|
+| `BDRAG_TRANSLATE=true` (default) | also searches the question in the other language, so an English question reaches a Bangla-only act (one short model call) |
+| `BDRAG_RERANK=cross` + `BDRAG_RERANK_PRECISION=int8` | reranks the top 20 with bge-reranker-v2-m3; `auto` picks bf16 on CPUs with native bf16 (about 3x faster than fp32), int8 is about 2x faster anywhere |
+| `OLLAMA_KEEP_ALIVE=30m`, `RAG_EXCERPT_CHARS=1000` | keeps the model loaded between questions; shorter excerpts make a CPU start answering sooner |
+| `BDRAG_MODELS=ollama:gemma4:e4b,groq:llama-3.3-70b-versatile` | adds a model picker to the page; hosted entries appear only when their key is set, and the page says the question leaves the machine |
+| `BDRAG_DAILY_LIMIT=500` | caps answers per day on a public demo |
+
+`RUN_UPGRADES.bat` (or `bdrag measure-upgrades`) measures translation, the reranker and
+the answering model on the test and scenario sets and writes `results/UPGRADES.md`.
+`bdrag coverage` counts acts with no text in the corpus (scanned, not downloaded,
+repealed) before you spend time on OCR, and `bdrag feedback-to-eval` turns the page's
+thumbs-down answers into draft evaluation questions.
+
 ### Acts that only exist as PDF (including scanned ones)
 
 ```bash

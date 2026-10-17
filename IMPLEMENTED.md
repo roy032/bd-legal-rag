@@ -153,6 +153,24 @@ Suite: **202 tests**, ruff clean, every `src/` module exercised.
 | Example questions grouped by area of law | **Done** | `service/static/index.html` |
 | English topic → Bangla act title, wage/defamation/cyber synonyms | **Done** — not yet measured on the full index | `rag/lexicon.py` |
 
+## Upgrades after the free-model run (2026-10-17)
+
+| Item | Status | Where |
+|---|---|---|
+| PRs #1, #2 and #3 combined, conflicts resolved, PDF ingest and index sync moved into the package | **Done** | `bdrag pdf`, `bdrag sync` |
+| Scenario evaluation set: the 8 situations the free models missed, gold ids checked against the site | **Done** | `data/eval/eval_scenarios.jsonl` |
+| English ↔ Bangla: search the question in the other language too | **Done** — measure with `bdrag measure-upgrades` | `--translate`, `BDRAG_TRANSLATE` |
+| Reranker on a CPU: bf16 / int8, shortest-first batches, score cache | **Done** — 20 excerpts: fp32 10.9 s, int8 6.2 s, bf16 3.8 s on a 4-core cloud CPU | `--rerank-precision`, `rag/rerank.py` |
+| Faster local answers: Ollama keep-alive, warm-up at start, excerpt length setting | **Done** | `OLLAMA_KEEP_ALIVE`, `RAG_EXCERPT_CHARS` |
+| Pick a bigger free hosted model per question | **Done** | `BDRAG_MODELS`, `GET /models`, UI picker |
+| Amendment year on excerpts and source cards | **Done** | `rag/answer.py: amendment_label` |
+| Source cards with the excerpt text, copy answer | **Done** | `service/static/index.html` |
+| Judge calibration: the report compared humans with "a reason exists" (always faithful); now with the verdicts, plus spreadsheet grading and correctness | **Fixed** | `bdrag calibrate-judge --export/--import` |
+| Daily answer cap for a public demo | **Done** | `BDRAG_DAILY_LIMIT` |
+| Count scanned / missing acts before OCR | **Done** | `bdrag coverage` |
+| Thumbs-down answers become draft eval questions | **Done** | `bdrag feedback-to-eval` |
+| One command to measure all of it on the laptop | **Done** — not yet run | `RUN_UPGRADES.bat`, `bdrag measure-upgrades` |
+
 ## The four things only you can do
 
 1. Scrape the corpus and check `stats.json`.

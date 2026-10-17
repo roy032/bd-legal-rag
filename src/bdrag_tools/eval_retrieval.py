@@ -28,7 +28,8 @@ def main() -> None:
     ap.add_argument("--model", default="BAAI/bge-m3")
     ap.add_argument("-k", type=int, default=10)
     add_retrieval_args(ap)
-    ap.add_argument("--provider", help="LLM for --multi-query / --hyde only")
+    ap.add_argument("--provider", help="LLM for --multi-query / --hyde / --rewrite / --translate only")
+    ap.add_argument("--llm-model", help="override $RAG_MODEL for that LLM")
     ap.add_argument("--label", required=True, help="name for this run (becomes results/<label>.json)")
     ap.add_argument("--results", default="results")
     ap.add_argument("--skip-validate", action="store_true")
@@ -45,7 +46,8 @@ def main() -> None:
             sys.exit("fix the evaluation set first — bad labels make every number meaningless")
 
     embedder = embedder_for(getattr(args, "mode", "dense"), args.embedder, args.model, args.index)
-    llm = get_llm(args.provider) if (args.multi_query or args.hyde) else None
+    wants_llm = args.multi_query or args.hyde or args.translate or args.rewrite != "none"
+    llm = get_llm(args.provider, args.llm_model) if wants_llm else None
     retriever = build_pipeline(args, args.index, embedder, llm=llm)
 
     run = run_retrieval(items, retriever, k=args.k)
