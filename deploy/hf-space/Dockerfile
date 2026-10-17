@@ -13,12 +13,13 @@ ARG BDRAG_REPO=https://github.com/roy032/bd-legal-rag
 ARG BDRAG_REF=main
 RUN git clone --depth 1 --branch ${BDRAG_REF} ${BDRAG_REPO} . \
  && pip install torch --index-url https://download.pytorch.org/whl/cpu \
- && pip install -e ".[serve,embed,hub,llm]" \
+ && pip install -e ".[serve,embed,hub]" \
  && chown -R user:user /home/user
 
 COPY --chown=user:user start.sh /home/user/start.sh
 USER user
 ENV HOME=/home/user HF_HOME=/home/user/.cache/huggingface \
-    BDRAG_INDEX=/home/user/app/data/index BDRAG_MODE=dense BDRAG_RATE_PER_MIN=20
+    BDRAG_INDEX=/home/user/app/data/index BDRAG_MODE=dense BDRAG_RATE_PER_MIN=20 \
+    BDRAG_DAILY_LIMIT=500 BDRAG_FEEDBACK=/home/user/app/data/feedback.jsonl
 EXPOSE 7860
 CMD ["bash", "/home/user/start.sh"]

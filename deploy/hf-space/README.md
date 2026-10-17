@@ -24,11 +24,16 @@ the statute text with the section cited. Source: https://github.com/roy032/bd-le
 3. In the Space settings add:
    - variable `BDRAG_INDEX_REPO` = `<you>/bdrag-index`
    - secret `HF_TOKEN` (read access), only if the dataset is private
-   - an answering model. Free options:
-     - Groq: variables `RAG_LLM=openai`, `RAG_MODEL=llama-3.3-70b-versatile`,
-       `OPENAI_BASE_URL=https://api.groq.com/openai/v1`; secret `OPENAI_API_KEY` = your Groq key
-     - Gemini: the same with `OPENAI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/`,
-       `RAG_MODEL=gemini-2.5-flash` and your Gemini key
+   - an answering model, as variables plus one secret. Free options:
+     - Groq: `RAG_LLM=groq`, `RAG_MODEL=llama-3.3-70b-versatile`; secret `GROQ_API_KEY`
+     - Gemini: `RAG_LLM=gemini`, `RAG_MODEL=gemini-flash-latest`; secret `GEMINI_API_KEY`
+     - Hugging Face: `RAG_LLM=hf`, `RAG_MODEL=Qwen/Qwen2.5-72B-Instruct`; the `HF_TOKEN` secret
+   - optional: let visitors pick a model, default first, e.g.
+     `BDRAG_MODELS=groq:llama-3.3-70b-versatile,groq:openai/gpt-oss-120b,gemini:gemini-flash-latest`
+     (entries whose key is missing are hidden)
+   - optional: `BDRAG_DAILY_LIMIT` (default 500 answers a day across all visitors) to stay
+     inside the free tier's quota; `BDRAG_RERANK=cross` with `BDRAG_RERANK_PRECISION=int8`
+     to turn on the reranker (a few seconds more per answer on the 2-vCPU Space)
    Without a model the Space still returns the matching sections, just no written answer.
 
 The first start downloads bge-m3 (~2.3 GB) and takes a few minutes. Free Spaces

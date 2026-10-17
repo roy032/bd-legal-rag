@@ -297,6 +297,12 @@ class TestServiceImprovements(unittest.TestCase):
         self.assertTrue(r.json()["degraded"])
         self.assertTrue(r.json()["sources"])
 
+    def test_daily_limit(self):
+        c = self.client(daily_limit=2)
+        q = {"question": "হত্যার শাস্তি কী?"}
+        self.assertEqual([c.post("/ask", json=q).status_code for _ in range(3)], [200, 200, 429])
+        self.assertEqual(c.post("/ask/stream", json=q).status_code, 429)
+
     def test_model_picker(self):
         from unittest import mock
 

@@ -118,6 +118,9 @@ class ServiceConfig:
     cache_ttl_s: float = 1800
     cache_size: int = 512
     rate_per_min: float = 20
+    # Answers per UTC day across all visitors; 0 = no cap. A public demo on a free
+    # hosted model key should set this below the provider's daily quota.
+    daily_limit: int = 0
     burst: int = 5
     api_keys: dict[str, float] = field(default_factory=dict)   # key -> requests/min
     require_api_key: bool = False
@@ -174,6 +177,7 @@ class ServiceConfig:
             models=[m.strip() for m in _env_str("BDRAG_MODELS", "").split(",") if m.strip()],
             cache_ttl_s=_env_float("BDRAG_CACHE_TTL", 1800.0) or 0.0,
             rate_per_min=_env_float("BDRAG_RATE_PER_MIN", 20.0) or 20.0,
+            daily_limit=_env_int("BDRAG_DAILY_LIMIT", 0),
             api_keys=keys,
             require_api_key=_env_bool("BDRAG_REQUIRE_API_KEY", False),
             entailer=_env_str("BDRAG_ENTAILER", "none"),
@@ -413,6 +417,23 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         blocked = limited(client)
         return blocked, client
 
+    daily = {"day": "", "n": 0}
+    daily_lock = threading.Lock()
+
+    def over_daily_limit() -> JSONResponse | None:
+        if not cfg.daily_limit:
+            return None
+        today = time.strftime("%Y-%m-%d", time.gmtime())
+        with daily_lock:
+            if daily["day"] != today:
+                daily.update(day=today, n=0)
+            if daily["n"] >= cfg.daily_limit:
+                metrics.inc("daily_limit_total")
+                return JSONResponse({"error": "this demo has answered its questions for today; "
+                                              "please try again tomorrow"}, status_code=429)
+            daily["n"] += 1
+        return None
+
     async def degraded_retrieval(question: str, k: int):
         hits = await run_in_threadpool(lambda: state["pipeline"].search(question, k=k))
         return JSONResponse({
@@ -538,6 +559,8 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         blocked, client = gate(request)
         if blocked is not None:
             return blocked
+        if (capped := over_daily_limit()) is not None:
+            return capped
         body = await payload(request)
         question = (body.get("question") or "").strip()
         if not question:
@@ -614,6 +637,8 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         blocked, client = gate(request)
         if blocked is not None:
             return blocked
+        if (capped := over_daily_limit()) is not None:
+            return capped
         body = await payload(request)
         question = (body.get("question") or "").strip()
         if not question:
