@@ -5,6 +5,7 @@
     bdrag ask "ধারা ৩০২ কী বলে?"          -> scripts/ask.py
     bdrag eval / ablate / failures / calibrate / tune / e2e
     bdrag serve [--port 8000]            -> uvicorn service.app:get_app
+    bdrag doctor                         -> checks index, models, LLM, OCR (rag/doctor.py)
 
 The scripts stay the source of truth (they run without installing anything);
 this wrapper exists so an installed checkout has a single, discoverable entry
@@ -29,6 +30,7 @@ SCRIPTS = {
     "sweep": "sweep_chunking.py",
     "template": "make_eval_template.py",
     "loadtest": "loadtest.py",
+    "pdf": "ingest_pdf.py",
 }
 
 
@@ -40,7 +42,7 @@ def _scripts_dir() -> Path:
 
 
 def usage() -> str:
-    names = ", ".join([*SCRIPTS, "serve"])
+    names = ", ".join([*SCRIPTS, "serve", "doctor"])
     return f"usage: bdrag <command> [args]\ncommands: {names}\n`bdrag <command> --help` for details."
 
 
@@ -50,6 +52,10 @@ def main(argv: list[str] | None = None) -> None:
         print(usage())
         return
     cmd, rest = argv[0], argv[1:]
+    if cmd == "doctor":
+        from .doctor import main as doctor
+
+        raise SystemExit(doctor(rest))
     if cmd == "serve":
         import uvicorn  # optional extra: pip install -e ".[serve]"
 

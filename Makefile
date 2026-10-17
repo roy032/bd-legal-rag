@@ -1,5 +1,5 @@
 .PHONY: help install dev test lint typecheck coverage ingest index eval ablate tune sweep \
-        calibrate failures gate serve demo loadtest docker-build docker-run clean
+        calibrate failures gate serve demo doctor pdf loadtest docker-build docker-run clean
 PY ?= python
 EVAL ?= data/eval/eval.jsonl
 INDEX ?= data/index
@@ -51,6 +51,12 @@ failures:        ## which stage is losing you the most?
 
 gate:            ## CI quality gate: fail if retrieval regressed
 	$(PY) scripts/ci_eval_gate.py --eval $(EVAL) --index $(INDEX)
+
+doctor:          ## check index, embedder, answering model and OCR are ready
+	PYTHONPATH=src $(PY) -m rag.cli doctor --index $(INDEX)
+
+pdf:             ## acts that exist only as PDF, OCR'd if scanned (PDFS="a.pdf b.pdf")
+	$(PY) scripts/ingest_pdf.py $(PDFS)
 
 serve:           ## run the API + UI on :8000
 	BDRAG_INDEX=$(INDEX) $(PY) -m uvicorn service.app:get_app --factory --app-dir src \

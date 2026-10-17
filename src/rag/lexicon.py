@@ -64,9 +64,40 @@ SYNONYM_GROUPS: list[list[str]] = [
     ["মাতৃত্ব", "প্রসূতি", "maternity"],
     ["ভোক্তা", "consumer"],
     ["আত্মহত্যা", "suicide"],
-    ["মানহানি", "defamation"],
+    ["মানহানি", "defamation", "defame", "defamatory", "libel", "slander"],
     ["জমি", "ভূমি", "land"],
+    # Gaps found in the free-model scenario run (2026-10-16): wage arrears, dismissal,
+    # defective goods and online offences reached the wrong sections or none.
+    ["মজুরি", "বেতন", "wage", "wages", "salary"],
+    ["বকেয়া", "arrears", "unpaid"],
+    ["বরখাস্ত", "ছাঁটাই", "dismissal", "dismissed", "termination", "retrenchment"],
+    ["ত্রুটিপূর্ণ", "defective", "faulty"],
+    ["সাইবার", "cyber", "অনলাইন", "online", "ফেসবুক", "facebook"],
 ]
+
+# A topic word -> the title of the act that governs it, in the act's own language.
+# Synonyms bridge single words; this bridges a question to an act whose title shares
+# no word with it, which is how the English consumer question missed the Bangla
+# ভোক্তা-অধিকার সংরক্ষণ আইন. Titles only, never section numbers: a bare "ধারা ৪৯৯"
+# would be resolved against whichever act the question happens to name.
+TOPIC_ACTS: dict[str, str] = {
+    "consumer": "ভোক্তা-অধিকার সংরক্ষণ আইন",
+    "ভোক্তা": "ভোক্তা-অধিকার সংরক্ষণ আইন",
+    "defamation": "Penal Code defamation",
+    "মানহানি": "Penal Code defamation",
+    "wage": "বাংলাদেশ শ্রম আইন মজুরি পরিশোধ",
+    "wages": "বাংলাদেশ শ্রম আইন মজুরি পরিশোধ",
+    "salary": "বাংলাদেশ শ্রম আইন মজুরি পরিশোধ",
+    "মজুরি": "বাংলাদেশ শ্রম আইন মজুরি পরিশোধ",
+    "বেতন": "বাংলাদেশ শ্রম আইন মজুরি পরিশোধ",
+    "cyber": "সাইবার নিরাপত্তা আইন",
+    "সাইবার": "সাইবার নিরাপত্তা আইন",
+    "dowry": "যৌতুক নিরোধ আইন",
+    "যৌতুক": "যৌতুক নিরোধ আইন",
+    "cheque": "Negotiable Instruments Act",
+    "চেক": "Negotiable Instruments Act",
+}
+TOPIC_ACTS = {nfc(k.lower()): nfc(v) for k, v in TOPIC_ACTS.items()}
 
 _INDEX: dict[str, set[str]] = {}
 for _group in SYNONYM_GROUPS:
@@ -90,11 +121,17 @@ def expand_synonyms(question: str, max_added: int = 6) -> str:
     # would miss the "উচ্ছেদ" group. Generating candidates costs nothing.
     present = raw | {c for w in raw for c in _stem_candidates(w)}
     extras: list[str] = []
+    titles: list[str] = []
+    for word in sorted(present):
+        title = TOPIC_ACTS.get(word)
+        if title and title not in titles and title not in nfc(question):
+            titles.append(title)
     for word in present:
         for alt in sorted(_INDEX.get(word, ())):
             if nfc(alt.lower()) not in present and alt not in extras:
                 extras.append(alt)
-    return f"{question} {' '.join(extras[:max_added])}".strip() if extras else question
+    added = extras[:max_added] + titles[:2]
+    return f"{question} {' '.join(added)}".strip() if added else question
 
 
 def classify(question: str) -> str:
