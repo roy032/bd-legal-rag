@@ -5,6 +5,7 @@
     bdrag ask "ধারা ৩০২ কী বলে?"          -> bdrag_tools.ask
     bdrag eval / ablate / failures / calibrate / tune / e2e / gate / ...
     bdrag serve [--port 8000]            -> uvicorn service.app:get_app
+    bdrag doctor                         -> checks index, models, LLM, OCR (rag/doctor.py)
 
 The tools are part of the installed package, so this works from any directory;
 `python scripts/<name>.py` still works from a checkout without installing.
@@ -32,12 +33,14 @@ COMMANDS = {
     "sweep": "sweep_chunking",
     "template": "make_eval_template",
     "loadtest": "loadtest",
+    "pdf": "ingest_pdf",
+    "sync": "sync_index",
 }
 SCRIPTS = COMMANDS          # old name, kept for anything that imported it
 
 
 def usage() -> str:
-    names = ", ".join([*COMMANDS, "serve"])
+    names = ", ".join([*COMMANDS, "serve", "doctor"])
     return f"usage: bdrag <command> [args]\ncommands: {names}\n`bdrag <command> --help` for details."
 
 
@@ -47,6 +50,10 @@ def main(argv: list[str] | None = None) -> None:
         print(usage())
         return
     cmd, rest = argv[0], argv[1:]
+    if cmd == "doctor":
+        from .doctor import main as doctor
+
+        raise SystemExit(doctor(rest))
     if cmd == "serve":
         import uvicorn  # optional extra: pip install -e ".[serve]"
 

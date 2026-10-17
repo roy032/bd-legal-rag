@@ -143,6 +143,16 @@ Suite: **202 tests**, ruff clean, every `src/` module exercised.
 | Pinned lockfile | **Not done** — `pyproject.toml` has ranges; pin when you deploy |
 | Demo video, live deployment, published dataset | **Not done** — yours to do |
 
+## Ideas taken from tonmoyjoy/Bangladesh-Legal-Chatbot (2026-10-17)
+
+| Item | Status | Where |
+|---|---|---|
+| OCR for scanned PDFs, with Bangla (`ben+eng`), header/page-number stripping, section splitting | **Done** — tested on text-layer and scanned Bangla PDFs | `ingest/pdf.py`, `src/bdrag_tools/ingest_pdf.py` |
+| Setup checker (`test_setup.py` there) | **Done** — `bdrag doctor` | `rag/doctor.py` |
+| Hosted demo with a prebuilt index | **Done** — Hugging Face Space files + index push/pull | `deploy/hf-space/`, `src/bdrag_tools/sync_index.py` |
+| Example questions grouped by area of law | **Done** | `service/static/index.html` |
+| English topic → Bangla act title, wage/defamation/cyber synonyms | **Done** — not yet measured on the full index | `rag/lexicon.py` |
+
 ## The four things only you can do
 
 1. Scrape the corpus and check `stats.json`.

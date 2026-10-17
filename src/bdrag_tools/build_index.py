@@ -71,13 +71,24 @@ def embed_with_reuse(chunks: list[dict], embedder, out: Path, checkpoint_every: 
     return vectors
 
 
-def load_chunks(path: Path) -> list[dict]:
-    return jsonio.read_jsonl(path)
+PDF_CHUNKS = Path("data/processed/pdf_chunks.jsonl")
+
+
+def load_chunks(path: Path | list[Path]) -> list[dict]:
+    """One or more chunk files; a later file's chunk replaces an earlier one with the same id."""
+    paths = path if isinstance(path, list) else [path]
+    merged: dict[str, dict] = {}
+    for p in paths:
+        for c in jsonio.read_jsonl(p):
+            merged[c["chunk_id"]] = c
+    return list(merged.values())
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--chunks", default="data/processed/chunks.jsonl")
+    ap.add_argument("--chunks", nargs="+", default=None,
+                    help="chunk file(s); default data/processed/chunks.jsonl, plus "
+                         "pdf_chunks.jsonl from `bdrag pdf` when it exists")
     ap.add_argument("--out", default="data/index")
     ap.add_argument("--embedder", choices=["st", "hashing"], default="st")
     ap.add_argument("--model", default="BAAI/bge-m3")
@@ -96,8 +107,11 @@ def main() -> None:
                     help="store int8 vectors (4x smaller, rescored exactly — measure the recall cost)")
     args = ap.parse_args()
 
-    chunks = load_chunks(Path(args.chunks))
-    print(f"{len(chunks)} chunks from {args.chunks}")
+    paths = [Path(p) for p in args.chunks] if args.chunks else [Path("data/processed/chunks.jsonl")]
+    if args.chunks is None and PDF_CHUNKS.exists():
+        paths.append(PDF_CHUNKS)
+    chunks = load_chunks(paths)
+    print(f"{len(chunks)} chunks from {', '.join(map(str, paths))}")
 
     if args.bm25 or args.bm25_only:
         t0 = time.perf_counter()

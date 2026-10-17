@@ -55,7 +55,7 @@ An agent mode sits alongside the single-shot path: the model calls `search`,
 
 ```bash
 pip install -e ".[serve]"     # or: make install
-make test                     # 268 tests, all offline — no API key, no model download
+make test                     # 300 tests, all offline — no API key, no model download
 make demo                     # full pipeline + ablation on the bundled sample corpus
 make serve                    # API + UI on :8000
 ```
@@ -98,6 +98,34 @@ list if one is refused. Free-tier hosts receive the question and the retrieved e
 Without a provider, the service returns retrieved provisions with HTTP 503 instead of
 presenting an offline stub as a generated answer. Set `RAG_LLM=echo` explicitly when
 testing retrieval-only behavior.
+
+### On a laptop, free, in five commands
+
+```bash
+pip install -e ".[serve,embed]"                         # once
+python scripts/sync_index.py pull --repo <you>/bdrag-index   # or copy data/index over
+ollama pull gemma4:e4b                                  # free local answering model
+bdrag doctor                                            # one line per check, with the fix
+RAG_LLM=ollama RAG_MODEL=gemma4:e4b bdrag serve         # http://localhost:8000
+```
+
+`bdrag doctor` checks the index, the embedding model cache, the answering model
+(Ollama running and the model pulled, or the hosted provider's key present) and
+OCR, and prints the command that fixes each failure.
+
+### Acts that only exist as PDF (including scanned ones)
+
+```bash
+pip install -e ".[pdf]"     # plus Tesseract with the Bengali language pack
+python scripts/ingest_pdf.py gazette.pdf --title "পল্লী সঞ্চয় ব্যাংক আইন, ২০১৪"
+python scripts/build_index.py --bm25     # picks up data/processed/pdf_chunks.jsonl, embeds only new chunks
+```
+
+Pages with no text layer are OCR'd with `ben+eng` (English-only OCR turns Bangla
+into noise). Running headers, page counters and print-to-PDF URLs are stripped,
+sections are cut at their headings (`৪৫। ...।—`, `302. ...—`), and every chunk
+records its page and whether it came from OCR. Some PDFs have a broken Bangla text
+layer (split conjuncts); `--ocr always` often reads those better than the text layer.
 
 ## What is in here
 
@@ -293,6 +321,13 @@ The image runs as a non-root user, carries no data (mount `./data`), and exposes
 `/health` for orchestration and `/metrics` for Prometheus. `.github/workflows/ci.yml`
 runs the tests and then the **retrieval quality gate** — a pull request that drops
 recall@5 below the committed baseline fails the build.
+
+**Free public demo on a Hugging Face Space.** `deploy/hf-space/` holds a Dockerfile,
+start script and Space README for the free CPU tier (16 GB RAM, enough for bge-m3).
+Push the index to a dataset repo once with `python scripts/sync_index.py push --repo
+<you>/bdrag-index --private`, set `BDRAG_INDEX_REPO` on the Space, and pick a free
+answering model (Groq or Gemini through `RAG_LLM=openai` + `OPENAI_BASE_URL`); the steps
+are in `deploy/hf-space/README.md`.
 
 The service is built on Starlette, the ASGI toolkit FastAPI is built on, to keep one
 small dependency; porting the handlers to FastAPI is mechanical if you want pydantic

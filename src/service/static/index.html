@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bangladesh Law Assistant</title>
-<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
 <meta name="description" content="Ask questions about the laws of Bangladesh in Bangla or English and get answers grounded in the statutory text, with the section cited.">
 <style>
   :root {
@@ -42,11 +42,15 @@
   .badge.warn { color:var(--warn); border-color:var(--warn); }
   .badge.ok { color:var(--accent); border-color:var(--accent); }
   .badge.bad { color:var(--bad); border-color:var(--bad); }
-  ol.sources { list-style:none; padding-left:0; margin:8px 0 0; font-size:14px; }  /* items carry their own [n], matching the answer */
+  ol.sources { padding-left:20px; margin:8px 0 0; font-size:14px; }
   ol.sources li { margin-bottom:6px; }
   a { color:var(--accent); }
   .foot { color:var(--muted); font-size:13px; margin-top:28px; }
-  .ex { background:none; border:0; color:var(--accent); cursor:pointer; padding:0; font-size:14px; }
+  .examples { margin-top:12px; font-size:14px; color:var(--muted); }
+  .examples summary { cursor:pointer; }
+  .exrow { margin:6px 0 0; line-height:1.6; }
+  .exarea { display:block; color:var(--ink); font-weight:600; font-size:13px; }
+  .ex { background:none; text-align:left; border:0; color:var(--accent); cursor:pointer; padding:0; font-size:14px; }
   .conf { font-size:13px; padding:2px 8px; border-radius:999px; border:1px solid var(--line); }
   .conf.high { color:var(--accent); border-color:var(--accent); }
   .conf.medium { color:var(--warn); border-color:var(--warn); }
@@ -62,17 +66,17 @@
 <body>
 <div class="wrap">
   <h1>Bangladesh Law Assistant <span style="font-weight:400">· বাংলাদেশ আইন সহায়ক</span></h1>
-  <div class="sub">Ask about the law or describe your situation, in Bangla or English. Every answer cites the section it relies on.</div>
+  <div class="sub">Answers grounded in the text of the Acts, with the section cited. Ask in Bangla or English.</div>
 
   <form id="f">
-    <input type="text" id="q" placeholder="ধারা ৩০২ কী বলে?  /  My landlord locked me out. What can I do?" autocomplete="off">
+    <input type="text" id="q" placeholder="ধারা ৩০২ কী বলে?  /  What is the punishment for negligence?" autocomplete="off">
     <button id="go" type="submit">Ask</button>
   </form>
   <div class="opts">
     <label><input type="checkbox" id="agent"> multi-step search</label>
     <label>excerpts <input type="number" id="k" value="5" min="1" max="20" style="width:56px"></label>
-    <span id="examples"></span>
   </div>
+  <details class="examples" open><summary>Example questions · উদাহরণ</summary><div id="examples"></div></details>
 
   <div class="card" id="out" hidden>
     <div class="status" id="status"></div>
@@ -94,11 +98,21 @@
 </div>
 <script>
 const $ = id => document.getElementById(id);
-const EXAMPLES = ["দণ্ডবিধির ধারা ৩০২ কী বলে?", "When can the police arrest without a warrant?",
-                  "শ্রমিকের দৈনিক কর্মঘণ্টা কত?", "What happens if a cheque bounces?",
-                  "কেউ আদালতের আদেশ ছাড়া আমার জমি দখল করেছে, আমি কী করব?",
-                  "My employer has not paid my salary for two months. What can I do?"];
-$("examples").innerHTML = EXAMPLES.map(e => `<button class="ex" data-q="${e.replace(/"/g, "&quot;")}">${e}</button>`).join(" · ");
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c =>
+  ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+// Grouped by area of law, so a first-time visitor sees what the corpus covers.
+const EXAMPLES = {
+  "Criminal · ফৌজদারি": ["দণ্ডবিধির ধারা ৩০২ কী বলে?", "When can the police arrest without a warrant?"],
+  "Family · পারিবারিক": ["যৌতুকের জন্য স্বামী মারধর করলে কী শাস্তি?", "What are a wife's rights to maintenance?"],
+  "Work · শ্রম": ["শ্রমিকের দৈনিক কর্মঘণ্টা কত?", "My employer has not paid my wages. What can I do?"],
+  "Money & consumers · অর্থ ও ভোক্তা": ["What happens if a cheque bounces?", "ত্রুটিপূর্ণ পণ্য বিক্রি করলে ভোক্তা কী করতে পারেন?"],
+  "Land & rent · ভূমি ও ভাড়া": ["বাড়িওয়ালা নোটিশ ছাড়া ভাড়াটিয়াকে উচ্ছেদ করতে পারেন?", "How is land registered?"],
+  "Rights · অধিকার": ["What does Article 27 of the Constitution say?", "গ্রেফতারের পর কতক্ষণের মধ্যে ম্যাজিস্ট্রেটের কাছে হাজির করতে হয়?"],
+};
+$("examples").innerHTML = Object.entries(EXAMPLES).map(([area, qs]) =>
+  `<div class="exrow"><span class="exarea">${esc(area)}</span> ` +
+  qs.map(e => `<button type="button" class="ex" data-q="${esc(e)}">${esc(e)}</button>`).join(" · ") +
+  `</div>`).join("");
 $("examples").onclick = e => { if (e.target.dataset.q) { $("q").value = e.target.dataset.q; $("f").requestSubmit(); } };
 
 function badge(text, cls="") { const b = document.createElement("span"); b.className = "badge " + cls; b.textContent = text; $("badges").appendChild(b); }
@@ -119,6 +133,7 @@ $("f").onsubmit = async ev => {
   ev.preventDefault();
   const question = $("q").value.trim();
   if (!question) return;
+  document.querySelector(".examples").open = false;
   const useAgent = $("agent").checked, k = +$("k").value || 5;
   $("out").hidden = false; $("answer").textContent = ""; $("badges").innerHTML = "";
   $("sources").innerHTML = ""; $("srcwrap").hidden = true; $("go").disabled = true;
@@ -164,8 +179,6 @@ async function stream(question, k) {
 
 // Everything below is data from the corpus or the model: escape before it
 // touches innerHTML (a section title or a tool name must never become markup).
-const esc = v => String(v ?? "").replace(/[&<>"']/g, c =>
-  ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const safeUrl = u => /^https?:\/\//i.test(u || "") ? esc(u) : "";
 
 function showSources(sources) {
