@@ -74,9 +74,10 @@ For generated answers, choose one provider before starting the service. The free
 come first; none of them needs a vendor SDK.
 
 ```bash
-# Local Ollama: free, no key, nothing leaves the machine (pull a model first)
-ollama pull qwen2.5:7b
-RAG_LLM=ollama RAG_MODEL=qwen2.5:7b OLLAMA_HOST=http://127.0.0.1:11434 make serve
+# Local Ollama: free, no key, nothing leaves the machine (pull a model first).
+# gemma4:e4b wrote the best Bangla of the small models tried on the scenario questions.
+ollama pull gemma4:e4b
+RAG_LLM=ollama RAG_MODEL=gemma4:e4b OLLAMA_HOST=http://127.0.0.1:11434 make serve
 
 # Any OpenAI-compatible local server (llama.cpp, LM Studio, vLLM)
 RAG_LLM=compat RAG_LLM_BASE_URL=http://127.0.0.1:8080/v1 RAG_MODEL=<model> make serve
