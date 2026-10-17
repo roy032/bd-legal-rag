@@ -35,6 +35,8 @@ COMMANDS = {
     "loadtest": "loadtest",
     "pdf": "ingest_pdf",
     "sync": "sync_index",
+    "coverage": "coverage",
+    "feedback-to-eval": "feedback_to_eval",
 }
 SCRIPTS = COMMANDS          # old name, kept for anything that imported it
 

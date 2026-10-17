@@ -417,7 +417,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         blocked = limited(client)
         return blocked, client
 
-    daily = {"day": "", "n": 0}
+    daily: dict = {"day": "", "n": 0}
     daily_lock = threading.Lock()
 
     def over_daily_limit() -> JSONResponse | None:
