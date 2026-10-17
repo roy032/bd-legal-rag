@@ -653,6 +653,10 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         question is not the one that pays for loading them."""
         try:
             build()
+            from rag.llm import warm_up
+
+            if warm_up(cfg.provider):
+                log.info("answering model loaded")
             log.info("index and models loaded")
         except Exception:
             log.exception("preload failed; the first request will retry")

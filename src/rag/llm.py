@@ -30,6 +30,10 @@ DEFAULT_MAX_TOKENS = int(os.environ.get("RAG_MAX_TOKENS") or "1024")
 # the prompt silently — the model then answers without the rules or the first
 # excerpts. 8k is enough for k=5 at 1.8k characters per excerpt.
 OLLAMA_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX") or "8192")
+# Ollama unloads an idle model after 5 minutes; reloading a 4B model on a laptop
+# costs 10-30 s, paid by whoever asks next. Keep it loaded for half an hour.
+# num_ctx stays fixed on purpose: changing it between calls forces a reload too.
+OLLAMA_KEEP_ALIVE = os.environ.get("OLLAMA_KEEP_ALIVE") or "30m"
 
 
 class LLMError(RuntimeError):
@@ -123,6 +127,7 @@ def ollama_llm(model: str | None = None, host: str | None = None,
     def call(system: str, prompt: str) -> str:
         r = requests.post(f"{host}/api/generate", timeout=timeout_s, json={
             "model": model, "system": system, "prompt": prompt, "stream": False,
+            "keep_alive": OLLAMA_KEEP_ALIVE,
             "options": {"temperature": 0, "num_predict": DEFAULT_MAX_TOKENS,
                         "num_ctx": OLLAMA_NUM_CTX}})
         if r.status_code >= 400:          # Ollama explains itself in the body ("model not found")
@@ -203,6 +208,27 @@ def compat_llm(provider: str = "compat", model: str | None = None,
         return strip_thinking(choices[0].get("message", {}).get("content") or "")
 
     return call
+
+
+def warm_up(provider: str | None = None, model: str | None = None) -> bool:
+    """Load a local Ollama model into memory before the first question needs it.
+
+    An empty prompt makes Ollama load the model and return at once. Hosted
+    providers have nothing to warm, so this is a no-op for them.
+    """
+    provider = (provider or os.environ.get("RAG_LLM", "echo")).lower()
+    if provider != "ollama":
+        return False
+    import requests
+
+    model = model or os.environ.get("RAG_MODEL", "qwen2.5:7b")
+    try:
+        r = requests.post(f"{ollama_host()}/api/generate", timeout=DEFAULT_TIMEOUT_S,
+                          json={"model": model, "keep_alive": OLLAMA_KEEP_ALIVE,
+                                "options": {"num_ctx": OLLAMA_NUM_CTX}})
+        return r.status_code < 400
+    except requests.RequestException:
+        return False
 
 
 def echo_llm() -> LLM:
@@ -314,7 +340,7 @@ def ollama_stream(model: str | None = None, host: str | None = None,
             # that stalls mid-answer fails instead of holding the connection forever.
             with requests.post(f"{host}/api/generate", stream=True, timeout=(10, timeout_s),
                                json={"model": model, "system": system, "prompt": prompt,
-                                     "stream": True,
+                                     "stream": True, "keep_alive": OLLAMA_KEEP_ALIVE,
                                      "options": {"temperature": 0, "num_predict": DEFAULT_MAX_TOKENS,
                                                  "num_ctx": OLLAMA_NUM_CTX}}) as r:
                 if r.status_code >= 400:

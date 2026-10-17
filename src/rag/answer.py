@@ -1,6 +1,7 @@
 """Prompt construction, grounded generation, and citation checking."""
 from __future__ import annotations
 
+import os
 import re
 import time
 from dataclasses import dataclass, field
@@ -84,7 +85,14 @@ class Answer:
         ]
 
 
-def format_context(hits: list[Hit], max_chars: int = 1500) -> str:
+# Characters of each excerpt the model sees. On a CPU, reading the prompt is most
+# of the wait before the first token (five Bangla excerpts are 3-4k tokens), so a
+# laptop can trade a little context for speed: RAG_EXCERPT_CHARS=1000.
+EXCERPT_CHARS = int(os.environ.get("RAG_EXCERPT_CHARS") or "1500")
+
+
+def format_context(hits: list[Hit], max_chars: int | None = None) -> str:
+    max_chars = max_chars or EXCERPT_CHARS
     blocks = []
     for n, h in enumerate(hits, 1):
         m = h.metadata

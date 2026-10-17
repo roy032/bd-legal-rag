@@ -104,3 +104,23 @@ class TestTranslateQuery(unittest.TestCase):
         llm.reset_mock()
         p.queries("What does section 302 say?")
         llm.assert_not_called()
+
+
+class TestOllamaSpeed(unittest.TestCase):
+    def test_keep_alive_sent_and_warm_up(self):
+        from rag import llm
+
+        resp = mock.Mock(status_code=200)
+        resp.json.return_value = {"response": "ok"}
+        with mock.patch("requests.post", return_value=resp) as post:
+            self.assertEqual(llm.ollama_llm("m")("s", "p"), "ok")
+            self.assertEqual(post.call_args.kwargs["json"]["keep_alive"], llm.OLLAMA_KEEP_ALIVE)
+            self.assertTrue(llm.warm_up("ollama", "m"))
+            self.assertNotIn("prompt", post.call_args.kwargs["json"])
+        self.assertFalse(llm.warm_up("groq"))
+
+    def test_excerpt_length_is_capped(self):
+        from rag.answer import format_context
+
+        h = Hit("1:1", 1.0, "x" * 3000, "x" * 3000, {"act_title": "A", "section_number": "1"})
+        self.assertLess(len(format_context([h], max_chars=500)), 600)
