@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bangladesh Law Assistant</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="icon" href="data:,">
 <meta name="description" content="Ask questions about the laws of Bangladesh in Bangla or English and get answers grounded in the statutory text, with the section cited.">
 <style>
   :root {
@@ -42,8 +42,13 @@
   .badge.warn { color:var(--warn); border-color:var(--warn); }
   .badge.ok { color:var(--accent); border-color:var(--accent); }
   .badge.bad { color:var(--bad); border-color:var(--bad); }
-  ol.sources { padding-left:20px; margin:8px 0 0; font-size:14px; }
-  ol.sources li { margin-bottom:6px; }
+  ol.sources { padding-left:0; list-style:none; margin:8px 0 0; font-size:14px; }
+  ol.sources li { margin-bottom:8px; border:1px solid var(--line); border-radius:10px; padding:8px 12px; }
+  ol.sources summary { cursor:pointer; }
+  ol.sources .excerpt { white-space:pre-wrap; margin:8px 0 2px; color:var(--ink); font-size:14px; }
+  select { padding:4px 8px; border:1px solid var(--line); border-radius:8px; background:var(--panel);
+    color:var(--ink); font-size:14px; max-width:100%; }
+  .hosted { color:var(--warn); font-size:13px; }
   a { color:var(--accent); }
   .foot { color:var(--muted); font-size:13px; margin-top:28px; }
   .examples { margin-top:12px; font-size:14px; color:var(--muted); }
@@ -66,15 +71,17 @@
 <body>
 <div class="wrap">
   <h1>Bangladesh Law Assistant <span style="font-weight:400">· বাংলাদেশ আইন সহায়ক</span></h1>
-  <div class="sub">Answers grounded in the text of the Acts, with the section cited. Ask in Bangla or English.</div>
+  <div class="sub">Ask about the law or describe your situation, in Bangla or English. Every answer cites the section it relies on.</div>
 
   <form id="f">
-    <input type="text" id="q" placeholder="ধারা ৩০২ কী বলে?  /  What is the punishment for negligence?" autocomplete="off">
+    <input type="text" id="q" placeholder="ধারা ৩০২ কী বলে?  /  My landlord locked me out. What can I do?" autocomplete="off">
     <button id="go" type="submit">Ask</button>
   </form>
   <div class="opts">
     <label><input type="checkbox" id="agent"> multi-step search</label>
     <label>excerpts <input type="number" id="k" value="5" min="1" max="20" style="width:56px"></label>
+    <label id="modelwrap" hidden>model <select id="model"></select></label>
+    <span id="hosted" class="hosted" hidden>your question is sent to an outside provider</span>
   </div>
   <details class="examples" open><summary>Example questions · উদাহরণ</summary><div id="examples"></div></details>
 
@@ -88,6 +95,7 @@
       <span>Was this useful?</span>
       <button id="fbup" aria-label="helpful">Yes</button>
       <button id="fbdown" aria-label="not helpful">No</button>
+      <button id="copytext" aria-label="copy answer">Copy answer</button>
       <button id="copy" aria-label="copy link">Copy link</button>
       <span id="fbmsg" aria-live="polite"></span>
     </div>
@@ -106,7 +114,7 @@ const EXAMPLES = {
   "Family · পারিবারিক": ["যৌতুকের জন্য স্বামী মারধর করলে কী শাস্তি?", "What are a wife's rights to maintenance?"],
   "Work · শ্রম": ["শ্রমিকের দৈনিক কর্মঘণ্টা কত?", "My employer has not paid my wages. What can I do?"],
   "Money & consumers · অর্থ ও ভোক্তা": ["What happens if a cheque bounces?", "ত্রুটিপূর্ণ পণ্য বিক্রি করলে ভোক্তা কী করতে পারেন?"],
-  "Land & rent · ভূমি ও ভাড়া": ["বাড়িওয়ালা নোটিশ ছাড়া ভাড়াটিয়াকে উচ্ছেদ করতে পারেন?", "How is land registered?"],
+  "Land & rent · ভূমি ও ভাড়া": ["বাড়িওয়ালা নোটিশ ছাড়া ভাড়াটিয়াকে উচ্ছেদ করতে পারেন?", "কেউ আদালতের আদেশ ছাড়া আমার জমি দখল করেছে, আমি কী করব?"],
   "Rights · অধিকার": ["What does Article 27 of the Constitution say?", "গ্রেফতারের পর কতক্ষণের মধ্যে ম্যাজিস্ট্রেটের কাছে হাজির করতে হয়?"],
 };
 $("examples").innerHTML = Object.entries(EXAMPLES).map(([area, qs]) =>
@@ -114,6 +122,31 @@ $("examples").innerHTML = Object.entries(EXAMPLES).map(([area, qs]) =>
   qs.map(e => `<button type="button" class="ex" data-q="${esc(e)}">${esc(e)}</button>`).join(" · ") +
   `</div>`).join("");
 $("examples").onclick = e => { if (e.target.dataset.q) { $("q").value = e.target.dataset.q; $("f").requestSubmit(); } };
+
+// Model picker: only shown when the server offers more than one answering model.
+let MODELS = [];
+(async () => {
+  try {
+    const d = await (await fetch("/models")).json();
+    MODELS = d.models || [];
+    if (MODELS.length < 2) return;
+    $("model").innerHTML = MODELS.map(m => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join("");
+    let saved = null;
+    try { saved = localStorage.getItem("bdrag-model"); } catch (e) {}
+    if (saved && MODELS.some(m => m.id === saved)) $("model").value = saved;
+    $("modelwrap").hidden = false;
+    showHosted();
+  } catch (e) { /* older server without /models */ }
+})();
+function showHosted() {
+  const m = MODELS.find(x => x.id === $("model").value);
+  $("hosted").hidden = !m || m.local;
+}
+$("model").onchange = () => {
+  try { localStorage.setItem("bdrag-model", $("model").value); } catch (e) {}
+  showHosted();
+};
+const chosenModel = () => $("modelwrap").hidden ? undefined : $("model").value;
 
 function badge(text, cls="") { const b = document.createElement("span"); b.className = "badge " + cls; b.textContent = text; $("badges").appendChild(b); }
 
@@ -144,7 +177,7 @@ $("f").onsubmit = async ev => {
     if (location.pathname.startsWith("/a/")) { /* permalink handled on load */ }
     if (useAgent) {
       const r = await fetch("/ask", {method:"POST", headers:{"content-type":"application/json"},
-        body: JSON.stringify({question, k, agent:true})});
+        body: JSON.stringify({question, k, agent:true, model: chosenModel()})});
       render(await r.json());
     } else {
       await stream(question, k);
@@ -155,7 +188,7 @@ $("f").onsubmit = async ev => {
 
 async function stream(question, k) {
   const r = await fetch("/ask/stream", {method:"POST", headers:{"content-type":"application/json"},
-    body: JSON.stringify({question, k})});
+    body: JSON.stringify({question, k, model: chosenModel()})});
   if (!r.ok) { render(await r.json()); return; }
   const reader = r.body.getReader(), dec = new TextDecoder();
   let buf = "";
@@ -184,9 +217,13 @@ const safeUrl = u => /^https?:\/\//i.test(u || "") ? esc(u) : "";
 function showSources(sources) {
   if (!sources || !sources.length) return;
   $("srcwrap").hidden = false;
+  // One expandable card per excerpt: the text the answer was built from, readable in place.
   $("sources").innerHTML = sources.map(s =>
-    `<li>[${esc(s.n)}] ${esc(s.citation)}${s.section_title ? " — " + esc(s.section_title) : ""}
-     ${safeUrl(s.url) ? `· <a href="${safeUrl(s.url)}" target="_blank" rel="noopener">official text</a>` : ""}
+    `<li><details><summary>[${esc(s.n)}] ${esc(s.citation)}${s.section_title ? " — " + esc(s.section_title) : ""}</summary>
+     ${s.text ? `<div class="excerpt">${esc(s.text)}</div>` : ""}</details>
+     ${safeUrl(s.url) ? `<a href="${safeUrl(s.url)}" target="_blank" rel="noopener">official text</a>` : ""}
+     ${s.amended ? `<span class="badge warn" title="This section has been changed by a later act; the text shown is the amended one.">${esc(s.amended)}</span>` : ""}
+     ${s.repealed ? `<span class="badge bad">repealed act</span>` : ""}
      ${s.live_check === "current" ? `<span class="badge ok">✓ matches the site today</span>` :
        s.live_check === "changed" ? `<span class="badge warn">⚠ changed on the site since indexing</span>` : ""}</li>`).join("");
 }
@@ -202,6 +239,12 @@ async function sendFeedback(rating) {
 }
 $("fbup").onclick = () => sendFeedback("up");
 $("fbdown").onclick = () => sendFeedback("down");
+$("copytext").onclick = async () => {
+  const src = [...document.querySelectorAll("#sources summary")].map(e => e.textContent.trim()).join("\n");
+  await navigator.clipboard.writeText($("answer").textContent + (src ? "\n\n" + src : "") +
+    "\n\nInformational only — not legal advice.");
+  $("fbmsg").textContent = "answer copied";
+};
 $("copy").onclick = async () => {
   if (!currentId) return;
   await navigator.clipboard.writeText(location.origin + "/a/" + currentId);
