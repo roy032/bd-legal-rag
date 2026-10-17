@@ -106,7 +106,8 @@ def main() -> None:
         print(f"\n### {full_label}: {overrides}")
         if cfg.rerank not in rerankers:
             try:
-                rerankers[cfg.rerank] = get_reranker(cfg.rerank, model=cfg.rerank_model)
+                rerankers[cfg.rerank] = get_reranker(cfg.rerank, model=cfg.rerank_model,
+                                                     precision=cfg.rerank_precision)
             except Exception as e:           # no model download possible here
                 print(f"  skipped — reranker unavailable: {e}")
                 continue

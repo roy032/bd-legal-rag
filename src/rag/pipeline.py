@@ -32,7 +32,7 @@ from .fusion import reciprocal_rank_fusion
 from .lexical import BM25Index
 from .lexicon import ROUTE_WEIGHTS, classify, expand_synonyms, is_colloquial
 from .parent import ParentIndex, expand_to_parents
-from .query import expand_section_refs, hyde, multi_query
+from .query import expand_section_refs, hyde, multi_query, translate_query
 from .refs import ActResolver, Reference, apply_reference
 from .rerank import get_reranker
 from .retrieve import Retriever, dedupe_by_section
@@ -49,6 +49,7 @@ class RetrievalConfig:
     rerank: str = "none"                 # none | cross | lexical
     rerank_model: str = "BAAI/bge-reranker-v2-m3"
     rerank_top: int = 0                  # 0 = rerank every candidate; else only the top N
+    rerank_precision: str = "auto"       # auto | fp32 | bf16 | int8 (see rerank.py)
     expand_refs: bool = False
     synonyms: bool = False
     transliterate: bool = False          # romanised Bangla -> Bangla variant
@@ -56,6 +57,7 @@ class RetrievalConfig:
     multi_query: int = 0                 # 0 = off; else number of rewrites requested
     hyde: bool = False
     rewrite: str = "none"                # none | colloquial | always: LLM rewrite + HyDE
+    translate: bool = False              # also search the question in the other language (1 call)
     mmr_lambda: float | None = None      # None = off; 0.7 is a sane start
     boost_in_force: bool = False
     parent_context: bool = False         # hand the model the whole section
@@ -113,6 +115,10 @@ class SearchPipeline:
             queries = multi_query(question, self.llm, n=n_rewrites) + queries[1:]
         if (cfg.hyde or rewrite) and self.llm:
             queries.append(hyde(question, self.llm))
+        # A question naming a section is resolved by lookup; translating it buys nothing.
+        if (cfg.translate and self.llm and not self.reference(question).numbers
+                and (translated := translate_query(question, self.llm))):
+            queries.append(translated)
         if cfg.synonyms:
             queries = [expand_synonyms(q) for q in queries]
         if cfg.expand_refs:
@@ -241,6 +247,8 @@ def add_retrieval_args(ap) -> None:
     ap.add_argument("--rerank-model", default="BAAI/bge-reranker-v2-m3")
     ap.add_argument("--rerank-top", type=int, default=0,
                     help="rerank only the top N candidates (0 = all); 20 keeps a CPU usable")
+    ap.add_argument("--rerank-precision", choices=["auto", "fp32", "bf16", "int8"], default="auto",
+                    help="auto = bf16 on CPUs with native bf16, else fp32; int8 is ~2x faster anywhere")
     ap.add_argument("--expand-refs", action="store_true", help="also search 'section 302' for 'ধারা ৩০২'")
     ap.add_argument("--synonyms", action="store_true", help="expand legal synonyms (উচ্ছেদ ↔ eviction)")
     ap.add_argument("--transliterate", action="store_true", help="also search a Bangla variant of romanised input")
@@ -249,6 +257,8 @@ def add_retrieval_args(ap) -> None:
     ap.add_argument("--hyde", action="store_true", help="embed a hypothetical provision (costs a call)")
     ap.add_argument("--rewrite", choices=["none", "colloquial", "always"], default="none",
                     help="LLM rewrites + HyDE; 'colloquial' only for first-person questions")
+    ap.add_argument("--translate", action="store_true",
+                    help="also search the question translated into the other language (costs a call)")
     ap.add_argument("--mmr-lambda", type=float, help="0..1 relevance/diversity trade-off; omit to disable")
     ap.add_argument("--boost-in-force", action="store_true", help="push omitted sections and repealed acts down")
     ap.add_argument("--parent-context", action="store_true", help="answer from the whole section")
@@ -299,5 +309,5 @@ def build_pipeline(config, index_dir: str | Path, embedder, llm=None,
     parents = None
     if cfg.parent_context:
         parents = ParentIndex(records if records is not None else load_records(index_dir))
-    reranker = get_reranker(cfg.rerank, model=cfg.rerank_model)
+    reranker = get_reranker(cfg.rerank, model=cfg.rerank_model, precision=cfg.rerank_precision)
     return SearchPipeline(cfg, dense=dense, bm25=bm25, reranker=reranker, llm=llm, parents=parents)

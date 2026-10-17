@@ -2,6 +2,9 @@
 
 expand_section_refs  free, deterministic, and the highest-value trick in this
                      corpus: "ধারা ৩০২" also searches "section 302" and "302".
+translate_query      ask the LLM for the question in the other language, search both.
+                     Most acts exist in only one language: an English question
+                     about consumer rights has to reach a Bangla-only act.
 multi_query          ask the LLM for 2-3 rephrasings, retrieve each, fuse.
 hyde                 ask the LLM to write the provision it expects, embed THAT.
                      An answer looks more like a statute than a question does.
@@ -89,3 +92,34 @@ def hyde(question: str, llm) -> str:
     except Exception:
         return question
     return (text or "").strip() or question
+
+
+TRANSLATE_PROMPT = """Translate this question about Bangladeshi law into {target}. Use the
+words the statutes themselves use (for Bangla, the formal legal register: "উচ্ছেদ",
+"মজুরি", "ভোক্তা-অধিকার"). Keep act names and section numbers. Reply with the
+translation only.
+
+Question: {question}"""
+
+_BANGLA = re.compile(r"[\u0980-\u09FF]")
+_LATIN = re.compile(r"[A-Za-z]")
+
+
+def script_language(text: str) -> str:
+    """"bn" when Bangla letters outnumber Latin ones, else "en" (romanised Bangla is "en")."""
+    return "bn" if len(_BANGLA.findall(text)) >= len(_LATIN.findall(text)) else "en"
+
+
+def translate_query(question: str, llm) -> str | None:
+    """The question in the other language, or None when the model fails or echoes it."""
+    source = script_language(question)
+    target = "English" if source == "bn" else "Bangla (Bengali script)"
+    try:
+        text = llm("You translate legal search queries. Output only the translation.",
+                   TRANSLATE_PROMPT.format(target=target, question=question))
+    except Exception:
+        return None                            # a failed translation must not fail the search
+    line = next((ln.strip(" \"'`") for ln in (text or "").splitlines() if ln.strip()), "")
+    if not line or line == question or script_language(line) == source:
+        return None
+    return line[:500]
