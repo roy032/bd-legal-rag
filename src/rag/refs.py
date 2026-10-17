@@ -130,6 +130,10 @@ def apply_reference(hits: list[Hit], ref: Reference, resolver: ActResolver) -> l
         for aid in ref.act_ids:
             for num in ref.numbers:
                 exact += resolver.lookup(aid, num)
+    # Mark the looked-up section so the answer prompt can label it: the model
+    # should cite the section the question names, not a neighbouring definition.
+    exact = [Hit(h.chunk_id, h.score, h.text, h.body, {**h.metadata, "requested": True})
+             for h in exact]
     seen = {h.chunk_id for h in exact}
     rest = [h for h in hits if h.chunk_id not in seen]
 

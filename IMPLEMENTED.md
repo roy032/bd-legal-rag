@@ -16,7 +16,7 @@ Suite: **202 tests**, ruff clean, every `src/` module exercised.
 | 4 | `sys.path` hack across packages | **Done** — installable package, `pyproject.toml`, bridge module deleted | `pyproject.toml` |
 | 5 | Streaming duplicated the answer logic | **Done** — one generator; `answer_question` consumes it | `rag/answer.py` |
 | 6 | Parent–child retrieval promised but missing | **Done** — `ParentIndex`, `--parent-context` | `rag/parent.py` |
-| 7 | `QdrantStore` never run | **Not done** — no Qdrant server in this environment; code unchanged and still unverified | — |
+| 7 | `QdrantStore` never run | **Done (embedded mode)** — top-k and scores match `NumpyStore` with and without filters; fixed id reuse on reopen and dropped callable filters. Not yet run against a Qdrant server with HNSW | `rag/store.py`, `tests/test_qdrant.py` |
 | 8 | Judge and answerer share a default model | **Done** — `eval_e2e` refuses a same-provider judge unless forced | `scripts/eval_e2e.py` |
 | 9 | `follow_refs` same-act only | **Done** — `act_refs` captured at parse time, followed across acts | `ingest/parse.py`, `rag/tools.py` |
 | 10 | `/metrics` missing HELP/TYPE | **Done** | `service/metrics.py` |
