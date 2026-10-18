@@ -10,6 +10,8 @@
                                       ┘
             ├─ exact references first (lookup, not search)
             ├─ in-force boost (repealed acts / [Omitted] stubs pushed down)
+            ├─ topic table: "my salary is unpaid" -> শ্রম আইন ss. 123, 132 get
+            │  reserved places (topics.py), plus a search inside that act
             ├─ dedupe parts of the same section
             ├─ MMR (relevance vs. diversity)
             ├─ cross-encoder rerank (top C -> k)
@@ -37,6 +39,7 @@ from .refs import ActResolver, Reference, apply_reference
 from .rerank import get_reranker
 from .retrieve import Retriever, dedupe_by_section
 from .store import Hit
+from .topics import TopicIndex, pin_topic_sections
 
 
 @dataclass
@@ -65,6 +68,8 @@ class RetrievalConfig:
     max_parts_per_section: int | None = None
     include_repealed: bool = False
     resolve_refs: bool = False           # act names + section numbers -> exact lookup
+    topics: bool = False                 # everyday situations -> governing sections (topics.py)
+    topic_slots: int = 3                 # places in the top k reserved for those sections
     embedder: str = ""
     extras: dict = field(default_factory=dict)
 
@@ -90,11 +95,18 @@ class SearchPipeline:
             raise ValueError("parent_context needs a ParentIndex")
         self.config, self.dense, self.bm25 = config, dense, bm25
         self.reranker, self.llm, self.parents = reranker, llm, parents
-        if config.resolve_refs and resolver is None:
+        if (config.resolve_refs or config.topics) and resolver is None:
             records = (bm25.records if bm25 is not None
                        else dense.store.records if dense is not None else [])
             resolver = ActResolver(records)
         self.resolver = resolver
+        self.topic_index = TopicIndex(resolver) if config.topics and resolver else None
+
+    def topic_hits(self, question: str) -> tuple[list[Hit], list[int]]:
+        """Governing sections and acts for the situation described; none when a section is named."""
+        if self.topic_index is None or self.reference(question).numbers:
+            return [], []
+        return self.topic_index.resolve(question)
 
     def reference(self, question: str) -> Reference:
         if not (self.config.resolve_refs and self.resolver):
@@ -156,6 +168,17 @@ class SearchPipeline:
         if ref.act_ids and not ref.numbers and act_id is None:
             # The question names an act: also search inside that act only.
             searches += [(question, {**filters, "act_id": aid}) for aid in ref.act_ids]
+        topic_pins, topic_acts = self.topic_hits(question) if act_id is None else ([], [])
+        if filters.get("language"):
+            topic_pins = [h for h in topic_pins
+                          if h.metadata.get("language") in filters["language"]]
+        if not include_repealed:
+            topic_pins = [h for h in topic_pins if not h.metadata.get("repealed")]
+        named = set(ref.act_ids) if not ref.numbers else set()
+        # Search inside the governing act too (two at most): its other sections
+        # (a definition, the punishment) compete on the question's own wording.
+        searches += [(question, {**filters, "act_id": aid})
+                     for aid in [a for a in topic_acts if a not in named][:2]]
         lists: list[list[Hit]] = []
         weights: list[float] = []
         for q, f in searches:
@@ -195,6 +218,8 @@ class SearchPipeline:
             candidates = pinned + self.reranker.rerank(question, pool, max(k - len(pinned), 0))
 
         hits = candidates[:k]
+        if topic_pins:
+            hits = pin_topic_sections(candidates, topic_pins, k=k, slots=cfg.topic_slots)
         if cfg.parent_context and self.parents:
             hits = expand_to_parents(hits, self.parents, max_chars=cfg.parent_max_chars)
         return hits
@@ -267,6 +292,10 @@ def add_retrieval_args(ap) -> None:
     ap.add_argument("--include-repealed", action="store_true")
     ap.add_argument("--resolve-refs", action="store_true",
                     help="look up 'দণ্ডবিধির ধারা ৩০২' directly instead of searching for it")
+    ap.add_argument("--topics", action="store_true",
+                    help="give the governing sections of everyday situations (unpaid wages, "
+                         "defamation, faulty goods) reserved places in the results")
+    ap.add_argument("--topic-slots", type=int, default=3)
 
 
 def open_store(index_dir: str | Path):

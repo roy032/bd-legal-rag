@@ -160,6 +160,9 @@ Suite: **202 tests**, ruff clean, every `src/` module exercised.
 | PRs #1, #2 and #3 combined, conflicts resolved, PDF ingest and index sync moved into the package | **Done** | `bdrag pdf`, `bdrag sync` |
 | Scenario evaluation set: the 8 situations the free models missed, gold ids checked against the site | **Done** | `data/eval/eval_scenarios.jsonl` |
 | English ↔ Bangla: search the question in the other language too | **Done** — measure with `bdrag measure-upgrades` | `--translate`, `BDRAG_TRANSLATE` |
+| Everyday situations reach their governing sections (consumer EN→BN, defamation ss. 499/500, Labour Act wage sections, rent, dowry, cheque, arrest, bail, divorce...) | **Done** — measure with `bdrag eval --topics` on the scenario set; check numbers with `bdrag topics` | `--topics`, `BDRAG_TOPICS`, `rag/topics.py` |
+| Situation answers: short answer, the law, numbered steps, optional uncited practical tips | **Done** — answer-system/v6; tips may not state law (`law_in_tips` check) | `rag/prompts.py` |
+| No matching provision -> labelled general guidance + legal-aid note instead of NOT_FOUND | **Done** in the service; off in evaluation | `BDRAG_GENERAL_FALLBACK`, `--general-fallback` |
 | Reranker on a CPU: bf16 / int8, shortest-first batches, score cache | **Done** — 20 excerpts: fp32 10.9 s, int8 6.2 s, bf16 3.8 s on a 4-core cloud CPU | `--rerank-precision`, `rag/rerank.py` |
 | Faster local answers: Ollama keep-alive, warm-up at start, excerpt length setting | **Done** | `OLLAMA_KEEP_ALIVE`, `RAG_EXCERPT_CHARS` |
 | Pick a bigger free hosted model per question | **Done** | `BDRAG_MODELS`, `GET /models`, UI picker |

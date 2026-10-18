@@ -103,7 +103,7 @@ class ServiceConfig:
     # dense bge-m3 beat both fusion settings there, and on the test set BM25 fusion cost recall.
     retrieval: RetrievalConfig = field(default_factory=lambda: RetrievalConfig(
         mode="dense", expand_refs=True, synonyms=True, transliterate=True, route=False,
-        boost_in_force=True, resolve_refs=True, max_parts_per_section=2))
+        boost_in_force=True, resolve_refs=True, topics=True, max_parts_per_section=2))
     k: int = 5
     max_k: int = 20
     min_score: float | None = None
@@ -125,6 +125,9 @@ class ServiceConfig:
     api_keys: dict[str, float] = field(default_factory=dict)   # key -> requests/min
     require_api_key: bool = False
     entailer: str = "none"           # none | lexical | nli
+    # When the indexed laws cannot answer, reply with labelled general guidance and
+    # the legal-aid note instead of a bare "not found" (rag.answer.general_guidance).
+    general_fallback: bool = True
     # Empty = don't write. Only from_env() turns logging on, so a ServiceConfig
     # built in a test never appends to the real data/queries.jsonl.
     feedback_path: str = ""
@@ -151,6 +154,8 @@ class ServiceConfig:
             route=_env_bool("BDRAG_ROUTE", False),
             boost_in_force=_env_bool("BDRAG_BOOST_IN_FORCE", True),
             resolve_refs=_env_bool("BDRAG_RESOLVE_REFS", True),
+            topics=_env_bool("BDRAG_TOPICS", True),
+            topic_slots=_env_int("BDRAG_TOPIC_SLOTS", 3),
             parent_context=_env_bool("BDRAG_PARENT_CONTEXT", False),
             mmr_lambda=_env_float("BDRAG_MMR"),
             max_parts_per_section=_env_int("BDRAG_MAX_PARTS", 2),
@@ -181,6 +186,7 @@ class ServiceConfig:
             api_keys=keys,
             require_api_key=_env_bool("BDRAG_REQUIRE_API_KEY", False),
             entailer=_env_str("BDRAG_ENTAILER", "none"),
+            general_fallback=_env_bool("BDRAG_GENERAL_FALLBACK", True),
             feedback_path=_env_str("BDRAG_FEEDBACK", "data/feedback.jsonl"),
             analytics_path=_env_str("BDRAG_ANALYTICS", "data/queries.jsonl"),
             cors_origins=[o.strip() for o in _env_str("BDRAG_CORS", "*").split(",") if o.strip()],
@@ -336,7 +342,8 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
                 log.warning("entailer '%s' unavailable; running without claim checking",
                             cfg.entailer)
                 state["entailer"] = None
-        return GuardConfig(min_score=cfg.min_score, entailer=state["entailer"])
+        return GuardConfig(min_score=cfg.min_score, entailer=state["entailer"],
+                           general_fallback=cfg.general_fallback)
 
     def agent() -> LegalAgent:
         if state["agent"] is None:
@@ -523,6 +530,8 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         return {
             "id": answer_id, "question": ans.question, "answer": ans.text,
             "refused": ans.refused, "abstained": ans.abstained, "repaired": ans.repaired,
+            # Not grounded in the indexed laws: label it and replace any streamed draft.
+            "general_guidance": ans.general,
             "failures": ans.failures, "sources": ans.sources,
             "confidence": ans.checks.get("confidence"),
             "llm_calls": ans.llm_calls, "cached": cached,

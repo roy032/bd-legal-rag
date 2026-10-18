@@ -69,6 +69,9 @@ def main() -> None:
                          "cosine, BM25 and fused scores live on different scales)")
     ap.add_argument("--min-hits", type=int, default=1)
     ap.add_argument("--no-repair", action="store_true", help="skip the corrective re-prompt")
+    ap.add_argument("--general-fallback", action="store_true",
+                    help="when the excerpts cannot answer, give labelled general guidance "
+                         "instead of NOT_FOUND (the service's default)")
     ap.add_argument("--allow-uncited", type=float, default=0.34,
                     help="tolerated share of sentences without a citation")
     ap.add_argument("--agent", action="store_true",
@@ -86,7 +89,8 @@ def main() -> None:
     llm = get_llm(args.provider, args.llm_model)
     retriever = build_pipeline(args, args.index, embedder, llm=llm)
     guard = GuardConfig(min_score=args.min_score, min_hits=args.min_hits,
-                        max_uncited_ratio=args.allow_uncited, repair=not args.no_repair)
+                        max_uncited_ratio=args.allow_uncited, repair=not args.no_repair,
+                        general_fallback=args.general_fallback)
 
     agent = (LegalAgent(retriever, load_records(args.index, args.chunks), llm,
                         AgentConfig(max_steps=args.max_steps, per_call_k=args.k, guard=guard))

@@ -11,8 +11,15 @@ from ingest.textutils import bn_to_ascii_digits, detect_lang
 from .confidence import confidence
 from .guardrails import GuardConfig, repair_instruction, run_checks, support_gate
 from .llm import LLM, LLMError
-from .prompts import ACTIVE_ANSWER_SYSTEM
-from .scope import OFF_TOPIC_REPLY, apply_notices, classify_request, wrap_untrusted
+from .prompts import ACTIVE_ANSWER_SYSTEM, GENERAL_GUIDANCE_V1
+from .scope import (
+    GENERAL_LABEL,
+    LEGAL_AID_NOTICE,
+    OFF_TOPIC_REPLY,
+    apply_notices,
+    classify_request,
+    wrap_untrusted,
+)
 from .store import Hit
 
 SYSTEM = ACTIVE_ANSWER_SYSTEM.text
@@ -71,6 +78,7 @@ class Answer:
     repaired: bool = False                       # a corrective re-prompt was needed
     abstained: bool = False                      # refused before calling the model
     llm_calls: int = 0
+    general: bool = False                        # labelled general guidance, not grounded
 
     @property
     def failures(self) -> list[str]:
@@ -162,6 +170,43 @@ def build_prompt(question: str, hits: list[Hit], sandwich: bool = True) -> str:
     )
 
 
+def general_guidance(question: str, llm: LLM) -> str | None:
+    """General orientation for a question the corpus cannot answer, labelled as such.
+
+    The label goes first and the legal-aid note last, added here rather than
+    asked of the model, so neither depends on a small model following orders.
+    None when the model fails or says nothing: the caller keeps its refusal.
+    """
+    lang = "bn" if detect_lang(question) == "bn" else "en"
+    reminder = ("প্রশ্নটি বাংলায়, তাই উত্তরও বাংলায় দিন।" if lang == "bn"
+                else "The question is in English; answer in English.")
+    try:
+        text = llm(GENERAL_GUIDANCE_V1.text, f"{wrap_untrusted(question)}\n\n{reminder}")
+    except LLMError:
+        return None
+    # No excerpts were shown, so a [n] can only be invented; a NOT_FOUND here is noise.
+    text = _LOOSE_CITE.sub("", normalize_answer(text))
+    text = _REFUSAL_HEAD.sub("", text).strip()
+    if not text:
+        return None
+    return GENERAL_LABEL[lang] + text + LEGAL_AID_NOTICE[lang]
+
+
+def with_general_guidance(answer: Answer, llm: LLM | None, guard: GuardConfig) -> Answer:
+    """Swap a refusal for general guidance when the service asks for it."""
+    if not (guard.general_fallback and llm and answer.refused):
+        return answer
+    t0 = time.perf_counter()
+    text = general_guidance(answer.question, llm)
+    if text is None:
+        return answer
+    return Answer(answer.question, text, answer.hits, refused=False, abstained=answer.abstained,
+                  latency_s=answer.latency_s + time.perf_counter() - t0,
+                  checks={**answer.checks, "confidence": None, "general_guidance": True,
+                          "grounded_reply": answer.text, "prompt_id": GENERAL_GUIDANCE_V1.id},
+                  llm_calls=answer.llm_calls + 1, general=True)
+
+
 def check_citations(text: str, n_hits: int) -> tuple[list[int], list[int]]:
     nums = [int(m) for m in CITE_RE.findall(text)]
     valid = sorted({n for n in nums if 1 <= n <= n_hits})
@@ -215,8 +260,10 @@ def answer_question_stream(question: str, retriever, stream_llm, k: int = 5,
     ok, why = support_gate(hits, guard)
     if not ok:
         answer = Answer(question, f"{REFUSAL_MARK}: {why}", hits, refused=True, abstained=True,
-                        latency_s=time.perf_counter() - t0)
-        yield {"type": "final", "answer": answer}
+                        latency_s=time.perf_counter() - t0, checks={"scope": flags})
+        if guard.general_fallback and repair_llm:
+            yield {"type": "status", "stage": "general_guidance"}
+        yield {"type": "final", "answer": with_general_guidance(answer, repair_llm, guard)}
         return
 
     ordered = reorder_sandwich(hits) if sandwich and len(hits) > 2 else hits
@@ -255,8 +302,12 @@ def answer_question_stream(question: str, retriever, stream_llm, k: int = 5,
     conf = (None if refused else
             confidence(ordered, cited, {**checks, "repaired": repaired},
                        entailment=checks.get("entailment")))
-    yield {"type": "final", "answer": Answer(
+    answer = Answer(
         question=question, text=text, hits=ordered, cited=cited, invalid_citations=invalid,
         refused=refused, latency_s=time.perf_counter() - t0,
         checks={**checks, "confidence": conf, "scope": flags, "prompt_id": SYSTEM_ID},
-        repaired=repaired, llm_calls=2 if repaired else 1)}
+        repaired=repaired, llm_calls=2 if repaired else 1)
+    if refused and guard.general_fallback and repair_llm:
+        # The streamed draft was a refusal; the final text replaces it.
+        yield {"type": "status", "stage": "general_guidance"}
+    yield {"type": "final", "answer": with_general_guidance(answer, repair_llm, guard)}

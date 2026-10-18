@@ -219,8 +219,18 @@ class TestEndpoints(unittest.TestCase):
         self.assertTrue(final["sources"])
 
     def test_abstains_when_min_score_is_high(self):
-        body = self.client(min_score=0.99).post("/ask", json={"question": "হত্যার শাস্তি কী?"}).json()
+        body = self.client(min_score=0.99, general_fallback=False).post(
+            "/ask", json={"question": "হত্যার শাস্তি কী?"}).json()
         self.assertTrue(body["refused"] and body["abstained"])
+        self.assertFalse(body["general_guidance"])
+
+    def test_weak_retrieval_gets_labelled_general_guidance_by_default(self):
+        body = self.client(min_score=0.99).post("/ask", json={"question": "হত্যার শাস্তি কী?"}).json()
+        self.assertTrue(body["general_guidance"] and body["abstained"])
+        self.assertFalse(body["refused"])
+        self.assertTrue(body["answer"].startswith("সাধারণ নির্দেশনা"))
+        self.assertIn("১৬৪৩০", body["answer"])
+        self.assertEqual(body["sources"], [])
 
     def test_agent_mode_reports_its_trace(self):
         pipeline, _, stream = fake_components()

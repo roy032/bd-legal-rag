@@ -117,6 +117,8 @@ OCR, and prints the command that fixes each failure.
 
 | Setting | What it does |
 |---|---|
+| `BDRAG_TOPICS=true` (default) | everyday situations (unpaid salary, dismissal, defamation, faulty goods, rent, dowry, cheque bounce, arrest, bail, divorce...) get the sections that govern them a reserved place in the results; `bdrag topics` shows what each topic resolves to in your index |
+| `BDRAG_GENERAL_FALLBACK=true` (default) | when the indexed laws have nothing on the question, the reply is labelled general guidance from the model, cites nothing, and ends with the legal-aid note (hotline 16430); `false` restores the plain "not found" |
 | `BDRAG_TRANSLATE=true` (default) | also searches the question in the other language, so an English question reaches a Bangla-only act (one short model call) |
 | `BDRAG_RERANK=cross` + `BDRAG_RERANK_PRECISION=int8` | reranks the top 20 with bge-reranker-v2-m3; `auto` picks bf16 on CPUs with native bf16 (about 3x faster than fp32), int8 is about 2x faster anywhere |
 | `OLLAMA_KEEP_ALIVE=30m`, `RAG_EXCERPT_CHARS=1000` | keeps the model loaded between questions; shorter excerpts make a CPU start answering sooner |

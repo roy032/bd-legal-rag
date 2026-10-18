@@ -45,8 +45,33 @@ class GuardConfig:
     repair: bool = True                 # one corrective re-prompt when a check fails
     entailer: Entailer | None = None    # set to check that cited text SUPPORTS each claim
     entail_threshold: float = 0.55
+    # When the excerpts cannot answer, ask the model for clearly labelled general
+    # guidance instead of a bare NOT_FOUND (answer.general_guidance). The service
+    # turns it on; evaluation leaves it off, because there a refusal is the result.
+    general_fallback: bool = False
     min_support_rate: float = 0.7       # share of claims that must be entailed
     extras: dict = field(default_factory=dict)
+
+
+# The uncited "Practical tips" list answer-system/v6 allows at the end of an answer.
+TIPS_HEAD = re.compile(r"^[\s*_#>`\-]*(?:practical tips|ব্যবহারিক পরামর্শ)\b[\s*_`:ঃ]*",
+                       re.IGNORECASE | re.MULTILINE)
+# Law has no place in that list: a rule stated there would escape every check.
+_LAW_IN_TIPS = re.compile(r"\[\d{1,2}\]|\b(?:section|article)\s*\d|ধারা\s*[0-9০-৯]|অনুচ্ছেদ\s*[0-9০-৯]|"
+                          r"\b(?:imprisonment|fine of)\b|কারাদণ্ড|অর্থদণ্ড",
+                          re.IGNORECASE)
+
+
+def split_tips(text: str) -> tuple[str, str]:
+    """(the grounded answer, the trailing practical-tips list or "")."""
+    m = TIPS_HEAD.search(text or "")
+    if not m:
+        return text, ""
+    return text[:m.start()].rstrip(), text[m.start():].strip()
+
+
+def law_in_tips(text: str) -> bool:
+    return bool(_LAW_IN_TIPS.search(split_tips(text)[1]))
 
 
 # --------------------------------------------------------------- pre-generation
@@ -89,6 +114,7 @@ def factual_sentences(text: str) -> list[str]:
 
 def citation_coverage(text: str, n_hits: int) -> dict:
     """How much of the answer is actually attributed, and where it isn't."""
+    text = split_tips(text)[0]
     sentences = factual_sentences(text)
     uncited = [s for s in sentences if not CITE_RE.search(s)]
     nums = [int(n) for n in CITE_RE.findall(text or "")]
@@ -164,6 +190,8 @@ def run_checks(question: str, text: str, hits: list[Hit], cfg: GuardConfig) -> d
         failures.append("fabricated_quotes")
     if not lang_ok:
         failures.append("language_mismatch")
+    if law_in_tips(text):
+        failures.append("law_in_tips")
     return {"coverage": cov, "quotes": quotes, "language_ok": lang_ok,
             "entailment": entailment, "failures": failures}
 
@@ -185,6 +213,9 @@ def repair_instruction(checks: dict) -> str:
                      f"Quote the exact words from an excerpt, or paraphrase without quotation marks.")
     if "language_mismatch" in checks["failures"]:
         parts.append("- Answer in the same language as the question.")
+    if "law_in_tips" in checks["failures"]:
+        parts.append("- The practical tips state law (a section, penalty, amount or citation). "
+                     "Move that into the cited part of the answer, or delete it from the tips.")
     if "unsupported_claims" in checks["failures"]:
         listed = "; ".join(f'"{c[:80]}"' for c in (checks.get("entailment") or {})
                            .get("unsupported", [])[:3])

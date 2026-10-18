@@ -201,7 +201,8 @@ class TestScope(unittest.TestCase):
     def test_active_prompt_applies_law_to_situations(self):
         from rag.prompts import ACTIVE_ANSWER_SYSTEM
         text = ACTIVE_ANSWER_SYSTEM.text
-        self.assertEqual(ACTIVE_ANSWER_SYSTEM.id, "answer-system/v5")
+        self.assertEqual(ACTIVE_ANSWER_SYSTEM.id, "answer-system/v6")
+        self.assertIn("What you can do", text)                # steps for a situation
         self.assertIn("apply the excerpts to\n   the facts", text)
         self.assertIn("answer that part", text)               # partial answers, not NOT_FOUND
         self.assertIn("Never use outside knowledge", text)    # still grounded

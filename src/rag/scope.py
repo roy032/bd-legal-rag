@@ -51,6 +51,27 @@ ADVICE_NOTICE = {
            "লিগ্যাল এইড অফিস।"),
 }
 
+# Opens every reply the corpus could not ground (answer.general_guidance).
+GENERAL_LABEL = {
+    "en": ("General guidance, not from the indexed laws: the collection of Bangladeshi "
+           "Acts this service searches had no provision that answers this, so what follows "
+           "is general information from the answering model. It may be incomplete or out "
+           "of date, and it cites nothing; check the actual law before relying on it.\n\n"),
+    "bn": ("সাধারণ নির্দেশনা, সংরক্ষিত আইন থেকে নয়: এই ব্যবস্থা যে বাংলাদেশি আইনগুলোর "
+           "সংগ্রহে খোঁজে, সেখানে এই প্রশ্নের উত্তর দেয় এমন কোনো বিধান পাওয়া যায়নি। তাই নিচের "
+           "তথ্য উত্তরদাতা মডেলের সাধারণ জ্ঞান থেকে; এটি অসম্পূর্ণ বা পুরনো হতে পারে এবং কোনো "
+           "সূত্র উল্লেখ করে না। এর ওপর নির্ভর করার আগে মূল আইন দেখে নিন।\n\n"),
+}
+
+LEGAL_AID_NOTICE = {
+    "en": ("\n\nFor advice on your situation, talk to a lawyer. Free legal help: the National "
+           "Legal Aid Services Organisation (hotline 16430) or the legal aid office at your "
+           "district judge's court."),
+    "bn": ("\n\nআপনার পরিস্থিতির জন্য একজন আইনজীবীর পরামর্শ নিন। বিনামূল্যে আইনি সহায়তা: "
+           "জাতীয় আইনগত সহায়তা প্রদান সংস্থা (হটলাইন ১৬৪৩০) বা আপনার জেলা জজ আদালতের "
+           "লিগ্যাল এইড অফিস।"),
+}
+
 OFF_TOPIC_REPLY = {
     "en": ("NOT_FOUND: this system only answers from the text of Bangladeshi Acts. "
            "That question is outside the corpus."),

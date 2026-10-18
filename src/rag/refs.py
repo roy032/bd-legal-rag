@@ -95,6 +95,10 @@ class ActResolver:
         years = re.findall(r"(1[6-9]\d\d|20\d\d)", bn_to_ascii_digits(self.titles.get(act_id, "")))
         return int(years[-1]) if years else None
 
+    def find_act(self, phrase: str) -> list[int]:
+        """The principal act whose title contains `phrase` (already normalised), or []."""
+        return self._principal(phrase)
+
     def _principal(self, phrase: str) -> list[int]:
         """Acts whose title contains `phrase`: in force first, amending acts last, shortest first."""
         found = [(aid, t) for aid, t in self.titles.items() if phrase in _norm(t)]
