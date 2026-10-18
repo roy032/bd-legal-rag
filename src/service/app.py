@@ -71,6 +71,19 @@ SECURITY_HEADERS = {
 }
 
 
+def security_headers(frame_ancestors: str = "") -> dict[str, str]:
+    """The headers every response carries. A Hugging Face Space shows the app inside
+    an iframe on huggingface.co, so a deployment can name the sites allowed to frame
+    it (BDRAG_FRAME_ANCESTORS="https://huggingface.co"); by default nobody may."""
+    if not frame_ancestors.strip():
+        return {**SECURITY_HEADERS,
+                "content-security-policy": SECURITY_HEADERS["content-security-policy"]
+                + "; frame-ancestors 'none'"}
+    headers = {k: v for k, v in SECURITY_HEADERS.items() if k != "x-frame-options"}
+    headers["content-security-policy"] += f"; frame-ancestors 'self' {frame_ancestors.strip()}"
+    return headers
+
+
 def _env_bool(name: str, default: bool = False) -> bool:
     raw = os.environ.get(name, "").strip()
     return raw.lower() in ("1", "true", "yes", "on") if raw else default
@@ -134,6 +147,7 @@ class ServiceConfig:
     verify_live: bool = False        # re-check cited sections against bdlaws (rag/verify.py)
     preload: bool = False            # load index and models at startup (from_env turns it on)
     cache_dir: str = "data/raw"        # honour X-Forwarded-For (only behind your own proxy)
+    frame_ancestors: str = ""        # sites allowed to embed the UI in an iframe; empty = none
 
     @classmethod
     def from_env(cls) -> ServiceConfig:
@@ -188,15 +202,17 @@ class ServiceConfig:
             verify_live=_env_bool("BDRAG_VERIFY_LIVE", False),
             preload=_env_bool("BDRAG_PRELOAD", True),
             cache_dir=_env_str("BDRAG_CACHE", "data/raw"),
+            frame_ancestors=_env_str("BDRAG_FRAME_ANCESTORS", ""),
         )
 
 
 class RequestContext(BaseHTTPMiddleware):
     """Request id, timing, metrics, security headers, structured logs, JSON 500."""
 
-    def __init__(self, app, metrics: Metrics) -> None:
+    def __init__(self, app, metrics: Metrics, headers: dict[str, str] | None = None) -> None:
         super().__init__(app)
         self.metrics = metrics
+        self.headers = headers or security_headers()
 
     async def dispatch(self, request: Request, call_next):
         rid = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
@@ -210,11 +226,11 @@ class RequestContext(BaseHTTPMiddleware):
                                       "event": "unhandled_error"}))
             self.metrics.inc("errors_total", path=request.url.path)
             return JSONResponse({"error": "internal error", "request_id": rid}, status_code=500,
-                                headers=SECURITY_HEADERS)
+                                headers=self.headers)
         took = time.perf_counter() - start
         self.metrics.inc("requests_total", path=request.url.path, status=response.status_code)
         self.metrics.observe("request", took, path=request.url.path)
-        response.headers.update({"x-request-id": rid, **SECURITY_HEADERS})
+        response.headers.update({"x-request-id": rid, **self.headers})
         log.info(json.dumps({"request_id": rid, "path": request.url.path,
                              "status": response.status_code, "ms": round(took * 1000)}))
         return response
@@ -643,6 +659,8 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         question = (body.get("question") or "").strip()
         if not question:
             return JSONResponse({"error": "question is required"}, status_code=400)
+        if len(question) > 500:
+            return JSONResponse({"error": "question too long (max 500 characters)"}, status_code=400)
         await run_in_threadpool(build)
         k = clamp_k(body.get("k"))
         if (picked := pick_model(body)) is None:
@@ -714,10 +732,19 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         return JSONResponse({"ok": True})
 
     async def permalink(request: Request):
+        # A shared link opened in a browser gets the page, which then fetches the
+        # stored answer as JSON from this same URL.
+        # The page asks with ?format=json: a browser may otherwise answer its fetch
+        # from the cached page, whatever Accept header the fetch sends.
+        accept = request.headers.get("accept", "")
+        vary = {"vary": "accept"}
+        if (request.query_params.get("format") != "json"
+                and "text/html" in accept and "application/json" not in accept):
+            return FileResponse(STATIC / "index.html", headers=vary)
         stored = recent.get(request.path_params["answer_id"])
         if not stored:
-            return JSONResponse({"error": "not found or expired"}, status_code=404)
-        return JSONResponse(stored)
+            return JSONResponse({"error": "not found or expired"}, status_code=404, headers=vary)
+        return JSONResponse(stored, headers=vary)
 
     async def index_page(request: Request):
         return FileResponse(STATIC / "index.html")
@@ -738,7 +765,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         routes.append(Mount("/static", StaticFiles(directory=str(STATIC)), name="static"))
 
     middleware = [
-        Middleware(RequestContext, metrics=metrics),
+        Middleware(RequestContext, metrics=metrics, headers=security_headers(cfg.frame_ancestors)),
         Middleware(CORSMiddleware, allow_origins=cfg.cors_origins, allow_methods=["*"],
                    allow_headers=["*"]),
     ]
