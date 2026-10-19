@@ -359,7 +359,8 @@ class TestServiceImprovements(unittest.TestCase):
 
     def test_ui_assets_are_served(self):
         c = self.client()
-        for path in ("/static/app.js", "/static/app.css", "/static/favicon.svg"):
+        for path in ("/static/app.js", "/static/app.css", "/static/favicon.svg",
+                     "/static/fonts/noto-sans-bengali-bengali-400-normal.woff2"):
             self.assertEqual(c.get(path).status_code, 200, path)
 
     def test_stream_rejects_an_overlong_question(self):

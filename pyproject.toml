@@ -36,7 +36,7 @@ package-dir = { "" = "src" }
 where = ["src"]
 
 [tool.setuptools.package-data]
-service = ["static/*"]
+service = ["static/*", "static/fonts/*"]
 
 [tool.ruff]
 line-length = 100

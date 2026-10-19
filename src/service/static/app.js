@@ -20,17 +20,19 @@ const T = {
     brand: "Bangladesh Law Assistant", brand2: "বাংলাদেশ আইন সহায়ক",
     h1: "Ask about Bangladeshi law, in Bangla or English",
     lead: "Ask what a section says, or describe your situation. Answers come from the text of the Acts, with every claim linked to the section it relies on.",
-    qlabel: "Your question", placeholder: "e.g. My landlord wants to evict me without notice. What can I do?  /  দণ্ডবিধির ধারা ৩০২ কী বলে?",
-    ask: "Ask", stop: "Stop", settings: "Answer settings", deep: "Deeper search (several lookups, slower)",
+    qlabel: "Your question", placeholder2: "Ask another question…", placeholder: "e.g. My landlord wants to evict me without notice. What can I do?  /  দণ্ডবিধির ধারা ৩০২ কী বলে?",
+    ask: "Ask", stop: "Stop", settings: "Settings", deep: "Deeper search (several lookups, slower)",
     excerpts: "Excerpts read", model: "Model", hosted: "Your question is sent to an outside provider.",
     trust1: "From the official text of Bangladeshi Acts", trust1n: n => `Searches ${n.toLocaleString("en")} sections of Bangladeshi Acts`,
     trust2: "Every claim cited to a section", trust3: "Free, no sign-up",
     examples: "Try a question", glabel: "General guidance — not from the indexed law text",
-    trace: "What the deeper search did", helpful: "Helpful", nothelpful: "Not helpful", copy: "Copy answer",
-    share: "Share link", print: "Print", send: "Send", sources: "Sources from the law",
+    trace: "What the deeper search did", helpful: "Helpful", nothelpful: "Not helpful", copy: "Copy",
+    share: "Share", print: "Print", useful: "Was this useful?", yes: "Yes", no: "No", call: "Call",
+    eyebrow: "Free · Bangla & English · Cited to the section", enterhint: "Enter to ask · Shift+Enter for a new line",
+    answerlabel: "Answer", send: "Send", sources: "Sources from the law",
     aid1: "Need help with your own case?",
     aid2: "Call the government's free legal aid hotline (National Legal Aid Services Organisation), toll-free, or visit the legal aid office at your district judge's court.",
-    recent: "Your recent questions", clear: "Clear history", how: "How this works",
+    recent: "Your recent questions", clear: "Clear", how: "How this works",
     how1: "Your question is matched against the sections of Bangladeshi Acts published on the Laws of Bangladesh website, in Bangla and English.",
     how2: "The closest sections are given to a language model, which answers only from them and cites each claim as [n].",
     how3: "Automatic checks confirm every citation points to a real excerpt. If the law text does not cover the question, it says so.",
@@ -58,17 +60,19 @@ const T = {
     brand: "বাংলাদেশ আইন সহায়ক", brand2: "Bangladesh Law Assistant",
     h1: "বাংলাদেশের আইন নিয়ে প্রশ্ন করুন, বাংলায় বা ইংরেজিতে",
     lead: "কোনো ধারা কী বলে জানতে চান, অথবা আপনার পরিস্থিতি লিখুন। উত্তর আসে আইনের মূল পাঠ থেকে, প্রতিটি কথার পাশে সংশ্লিষ্ট ধারার উল্লেখসহ।",
-    qlabel: "আপনার প্রশ্ন", placeholder: "যেমন: বাড়িওয়ালা নোটিশ ছাড়া উচ্ছেদ করতে চায়, আমি কী করতে পারি?  /  What does section 302 of the Penal Code say?",
-    ask: "জিজ্ঞাসা করুন", stop: "থামান", settings: "উত্তরের সেটিংস", deep: "গভীর অনুসন্ধান (একাধিক খোঁজ, সময় বেশি লাগে)",
+    qlabel: "আপনার প্রশ্ন", placeholder2: "আরেকটি প্রশ্ন লিখুন…", placeholder: "যেমন: বাড়িওয়ালা নোটিশ ছাড়া উচ্ছেদ করতে চায়, আমি কী করতে পারি?  /  What does section 302 of the Penal Code say?",
+    ask: "জিজ্ঞাসা করুন", stop: "থামান", settings: "সেটিংস", deep: "গভীর অনুসন্ধান (একাধিক খোঁজ, সময় বেশি লাগে)",
     excerpts: "কতগুলো অংশ পড়বে", model: "মডেল", hosted: "আপনার প্রশ্ন একটি বাইরের সেবাদাতার কাছে পাঠানো হবে।",
     trust1: "বাংলাদেশের আইনের সরকারি পাঠ থেকে", trust1n: n => `বাংলাদেশের আইনের ${toBn(n.toLocaleString("en"))}টি অংশে খোঁজে`,
     trust2: "প্রতিটি কথার সঙ্গে ধারার উল্লেখ", trust3: "বিনামূল্যে, নিবন্ধন লাগে না",
     examples: "একটি প্রশ্ন দিয়ে শুরু করুন", glabel: "সাধারণ দিকনির্দেশনা — সূচিভুক্ত আইনের পাঠ থেকে নয়",
-    trace: "গভীর অনুসন্ধানে কী করা হলো", helpful: "উপকারী", nothelpful: "উপকারী নয়", copy: "উত্তর কপি করুন",
-    share: "লিংক শেয়ার করুন", print: "প্রিন্ট", send: "পাঠান", sources: "আইনের উৎস",
+    trace: "গভীর অনুসন্ধানে কী করা হলো", helpful: "উপকারী", nothelpful: "উপকারী নয়", copy: "কপি",
+    share: "শেয়ার", print: "প্রিন্ট", useful: "উত্তরটি কি কাজে লেগেছে?", yes: "হ্যাঁ", no: "না", call: "কল করুন",
+    eyebrow: "বিনামূল্যে · বাংলা ও ইংরেজি · ধারাসহ উত্তর", enterhint: "Enter চাপলে প্রশ্ন যাবে · নতুন লাইনে Shift+Enter",
+    answerlabel: "উত্তর", send: "পাঠান", sources: "আইনের উৎস",
     aid1: "নিজের মামলায় সাহায্য দরকার?",
     aid2: "সরকারের বিনামূল্যের আইনগত সহায়তা হটলাইনে (জাতীয় আইনগত সহায়তা প্রদান সংস্থা) টোল-ফ্রি কল করুন, অথবা আপনার জেলা জজ আদালতের লিগ্যাল এইড অফিসে যান।",
-    recent: "আপনার সাম্প্রতিক প্রশ্ন", clear: "ইতিহাস মুছুন", how: "এটি কীভাবে কাজ করে",
+    recent: "আপনার সাম্প্রতিক প্রশ্ন", clear: "মুছুন", how: "এটি কীভাবে কাজ করে",
     how1: "আপনার প্রশ্ন Laws of Bangladesh ওয়েবসাইটে প্রকাশিত বাংলাদেশের আইনের ধারাগুলোর সঙ্গে মিলিয়ে দেখা হয়, বাংলা ও ইংরেজি দুই ভাষাতেই।",
     how2: "সবচেয়ে কাছের ধারাগুলো একটি ভাষা মডেলকে দেওয়া হয়, যা কেবল সেগুলো থেকেই উত্তর দেয় এবং প্রতিটি কথার পাশে [n] আকারে উৎস দেখায়।",
     how3: "স্বয়ংক্রিয় যাচাই নিশ্চিত করে যে প্রতিটি উল্লেখ একটি আসল অংশকে নির্দেশ করে। আইনের পাঠে উত্তর না থাকলে তা স্পষ্ট বলা হয়।",
@@ -98,24 +102,24 @@ const t = (key, ...a) => { const v = T[LANG][key] ?? T.en[key]; return typeof v 
 
 // Grouped by area of law, so a first-time visitor sees what the corpus covers.
 const EXAMPLES = [
-  {area: {en: "Your situation", bn: "আপনার পরিস্থিতি"}, qs: [
+  {ico: "🧭", area: {en: "Your situation", bn: "আপনার পরিস্থিতি"}, qs: [
     "My employer has not paid my wages for two months. What can I do?",
     "বাড়িওয়ালা নোটিশ ছাড়া আমাকে উচ্ছেদ করতে চায়, আমি কী করতে পারি?",
     "কেউ আদালতের আদেশ ছাড়া আমার জমি দখল করেছে, আমি কী করব?",
     "Someone is posting lies about me on Facebook. Is that a crime?"]},
-  {area: {en: "Criminal", bn: "ফৌজদারি"}, qs: [
+  {ico: "⚖️", area: {en: "Criminal", bn: "ফৌজদারি"}, qs: [
     "দণ্ডবিধির ধারা ৩০২ কী বলে?", "When can the police arrest without a warrant?",
     "What is the punishment for theft?", "জামিনযোগ্য অপরাধ কাকে বলে?"]},
-  {area: {en: "Family", bn: "পারিবারিক"}, qs: [
+  {ico: "👪", area: {en: "Family", bn: "পারিবারিক"}, qs: [
     "যৌতুকের জন্য স্বামী মারধর করলে কী শাস্তি?", "What are a wife's rights to maintenance?",
     "বাল্যবিবাহের শাস্তি কী?", "What protection does the domestic violence law give?"]},
-  {area: {en: "Work", bn: "শ্রম"}, qs: [
+  {ico: "🛠️", area: {en: "Work", bn: "শ্রম"}, qs: [
     "শ্রমিকের দৈনিক কর্মঘণ্টা কত?", "How much maternity leave does a worker get?",
     "Can my employer fire me without notice?", "ওভারটাইমের মজুরি কীভাবে হিসাব হয়?"]},
-  {area: {en: "Money & consumers", bn: "অর্থ ও ভোক্তা"}, qs: [
+  {ico: "🛒", area: {en: "Money & consumers", bn: "অর্থ ও ভোক্তা"}, qs: [
     "What happens if a cheque bounces?", "ত্রুটিপূর্ণ পণ্য বিক্রি করলে ভোক্তা কী করতে পারেন?",
     "A shop charged me more than the printed price. Where do I complain?", "ভেজাল খাদ্য বিক্রির শাস্তি কী?"]},
-  {area: {en: "Rights & police", bn: "অধিকার ও পুলিশ"}, qs: [
+  {ico: "🛡️", area: {en: "Rights & police", bn: "অধিকার ও পুলিশ"}, qs: [
     "What does Article 27 of the Constitution say?", "গ্রেফতারের পর কতক্ষণের মধ্যে ম্যাজিস্ট্রেটের কাছে হাজির করতে হয়?",
     "How do I request information from a government office?", "সংবিধানে বাকস্বাধীনতা সম্পর্কে কী বলা আছে?"]},
 ];
@@ -130,7 +134,7 @@ function applyLang(lang) {
     if (key === "trust1" && CORPUS) el.textContent = t("trust1n", CORPUS);
     else el.textContent = t(key);
   });
-  $("q").placeholder = t("placeholder");
+  $("q").placeholder = t(document.body.classList.contains("answered") ? "placeholder2" : "placeholder");
   document.querySelectorAll(".seg [data-lang]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.lang === LANG)));
   renderTabs();
   renderHistory();
@@ -150,7 +154,7 @@ $("theme").onclick = () => {
 let TAB = 0;
 function renderTabs() {
   $("tabs").innerHTML = EXAMPLES.map((g, i) =>
-    `<button type="button" class="tab" role="tab" aria-selected="${i === TAB}" data-i="${i}">${esc(g.area[LANG])}</button>`).join("");
+    `<button type="button" class="tab" role="tab" aria-selected="${i === TAB}" data-i="${i}"><span class="ico" aria-hidden="true">${g.ico}</span>${esc(g.area[LANG])}</button>`).join("");
   $("exlist").innerHTML = EXAMPLES[TAB].qs.map(q =>
     `<button type="button" class="ex" data-q="${esc(q)}">${esc(q)}</button>`).join("");
 }
@@ -177,6 +181,9 @@ document.addEventListener("keydown", e => {
   }
 });
 $("f").onsubmit = e => { e.preventDefault(); submit(); };
+// The settings popover closes on asking, on Escape and on a click outside it.
+document.addEventListener("click", e => { if (!e.target.closest("#settings")) $("settings").open = false; });
+document.addEventListener("keydown", e => { if (e.key === "Escape") $("settings").open = false; });
 
 // Model picker: only shown when the server offers more than one answering model.
 let MODELS = [];
@@ -263,38 +270,47 @@ function steps(active, done = []) {
   const optional = s => s === "s_check" || s === "s_guide";
   const show = active === "s_guide" ? ["s_search", "s_guide"]
     : STEPS.filter(s => !optional(s) || active === s || done.includes(s));
-  $("steps").innerHTML = active === null && !done.length ? "" : show.map(s =>
+  // Only the current step is visible (CSS); the rest stay in the list for screen readers.
+  $("steps").innerHTML = active === null ? "" : show.map(s =>
     `<li class="${done.includes(s) ? "done" : s === active ? "on" : ""}">${esc(t(s))}</li>`).join("");
 }
 
 function setNotice(kind, title, body = "") {
-  $("notice").innerHTML = title ? `<div class="notice ${kind}"><div><b>${esc(title)}</b>${body ? esc(body) : ""}</div></div>` : "";
+  const icon = kind === "bad"
+    ? '<svg class="ni" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-2h2zm0-4h-2V7h2z"/></svg>'
+    : '<svg class="ni" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M1 21h22L12 2zm12-3h-2v-2h2zm0-4h-2v-4h2z"/></svg>';
+  $("notice").innerHTML = title ? `<div class="notice ${kind}" role="status">${icon}<div><b>${esc(title)}</b>${body ? esc(body.trim()) : ""}</div></div>` : "";
 }
 
 let SOURCES = new Map();    // n -> source card, as streamed; final marks which are cited
 function renderSources(cited = null) {
   const list = [...SOURCES.values()].sort((a, b) =>
     (cited ? (cited.has(b.n) - cited.has(a.n)) : 0) || a.n - b.n);
+  $("result").classList.toggle("nosources", !list.length);
   if (!list.length) { $("srcwrap").hidden = true; return; }
   $("srcwrap").hidden = false;
+  $("srccount").textContent = LANG === "bn" ? toBn(list.length) : list.length;
   const num = n => LANG === "bn" ? toBn(n) : n;
   $("sources").innerHTML = list.map(s => {
     const uncited = cited && !cited.has(s.n);
     const badges = [
-      uncited ? `<span class="badge">${esc(t("notcited"))}</span>` : "",
       s.amended ? `<span class="badge warn" title="This section has been changed by a later act; the text shown is the amended one.">${esc(LANG === "bn" ? s.amended.replace("amended", t("amended")).replace("latest", "সর্বশেষ") : s.amended)}</span>` : "",
       s.repealed ? `<span class="badge bad">${esc(t("repealed"))}</span>` : "",
       s.live_check === "current" ? `<span class="badge ok">${esc(t("current"))}</span>` :
         s.live_check === "changed" ? `<span class="badge warn">${esc(t("changed"))}</span>` : "",
     ].join("");
-    const act = s.act_title && !String(s.citation || "").includes(s.act_title) ? s.act_title : "";
+    // "The Penal Code, 1860, section 304A" -> act on a small line, section as the title.
+    const cite = String(s.citation || "");
+    const act = s.act_title || "";
+    const sec = act && cite.startsWith(act) ? cite.slice(act.length).replace(/^[\s,،]+/, "") : cite;
     return `<li><details class="src${uncited ? " uncited" : ""}" id="src-${esc(s.n)}">
       <summary><span class="num">${esc(num(s.n))}</span>
-        <span class="meta"><span class="cit">${esc(s.citation)}${s.section_title ? " — " + esc(s.section_title) : ""}</span>
-        ${act ? `<span class="act">${esc(act)}</span>` : ""}</span>
+        <span class="meta">${act && sec !== cite ? `<span class="act">${esc(act)}</span>` : ""}
+        <span class="cit">${esc(sec || cite)}${s.section_title ? " — " + esc(s.section_title) : ""}</span>
+        <span class="tags">${uncited ? `<span class="badge">${esc(t("notcited"))}</span>` : ""}${badges}</span></span>
         <svg class="chev" width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="m9 6 6 6-6 6-1.4-1.4L12.2 12 7.6 7.4z"/></svg></summary>
       <div class="body">${s.text ? `<div class="excerpt">${esc(s.text)}</div>` : ""}
-        <div class="links">${safeUrl(s.url) ? `<a href="${safeUrl(s.url)}" target="_blank" rel="noopener">${esc(t("official_text"))} ↗</a>` : ""}${badges}</div>
+        ${safeUrl(s.url) ? `<div class="links"><a href="${safeUrl(s.url)}" target="_blank" rel="noopener">${esc(t("official_text"))} ↗</a></div>` : ""}
       </div></details></li>`;
   }).join("");
 }
@@ -303,7 +319,14 @@ function openSource(n) {
   const el = $("src-" + n);
   if (!el) return;
   el.open = true;
-  el.scrollIntoView({behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start"});
+  const behavior = matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+  const col = $("srcwrap");
+  if (getComputedStyle(col).position === "sticky") {
+    // Side-by-side layout: scroll the sources column only, keep the answer in view.
+    col.scrollTo({top: Math.max(0, el.offsetTop - 44), behavior});
+  } else {
+    el.scrollIntoView({behavior, block: "start"});
+  }
   el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
 }
 document.addEventListener("click", e => { const c = e.target.closest(".cite"); if (c) openSource(c.dataset.n); });
@@ -332,7 +355,7 @@ function render(d, opts = {}) {
     const off = d.abstained && !(d.sources || []).length && /outside the corpus|সংগ্রহের বাইরে/.test(d.answer || "");
     setNotice("warn", off ? t("offtopic") : t("notfound"), off ? "" : " " + t("notfound2"));
     const why = refusalText(d.answer);
-    $("answer").innerHTML = why && !off ? `<p class="badge" style="display:inline-block">${esc(why)}</p>` : "";
+    $("answer").innerHTML = why && !off ? `<p class="refusal">${esc(why)}</p>` : "";
   } else if (d.general_guidance) {
     // Nothing in the indexed law matched, so the server wrote general guidance
     // instead: keep it visibly apart from cited answers.
@@ -387,7 +410,10 @@ function busy(on) {
 }
 
 function startView(question) {
+  $("settings").open = false;
   document.body.classList.add("answered");
+  // The question moves to the heading above the answer; the box is free for the next one.
+  box.value = ""; grow(); box.placeholder = t("placeholder2");
   $("result").hidden = false;
   $("qecho").textContent = question;
   $("answer").innerHTML = "";
@@ -412,7 +438,10 @@ async function failed(r) {
 async function submit() {
   const question = box.value.trim();
   if (!question || $("go").disabled) return;
-  if (question.length > MAX_CHARS) { startView(question); steps(null); $("skeleton").hidden = true; setNotice("warn", t("toolong", MAX_CHARS)); return; }
+  if (question.length > MAX_CHARS) {
+    startView(question); box.value = question; grow();      // keep the text so it can be shortened
+    steps(null); $("skeleton").hidden = true; setNotice("warn", t("toolong", MAX_CHARS)); return;
+  }
   startView(question);
   rememberQ(question);
   busy(true);
@@ -557,7 +586,6 @@ grow();
     const r = await fetch("/a/" + m[1] + "?format=json", {headers: {accept: "application/json"}});
     if (!r.ok) { history.replaceState(null, "", "/"); return; }
     const d = await r.json();
-    box.value = d.question || ""; grow();
     startView(d.question || "");
     render(d, {fromPermalink: true});
   } catch (e) {}
