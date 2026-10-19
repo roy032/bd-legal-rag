@@ -78,9 +78,13 @@ TOPICS: tuple[Topic, ...] = (
         ActRef(("যৌতুক নিরোধ আইন", "dowry prohibition"), ("3",), 1256),          # VERIFIED
         ActRef(WOMEN_CHILD, ("11",), 835),                                       # VERIFIED
     )),
-    Topic("rape", ("rape", "raped", "ধর্ষণ", "sexual assault", "sexually assault",
-                   "যৌন নিপীড়ন", "যৌন হয়রানি", "sexual harass"), (
-        ActRef(WOMEN_CHILD, ("9", "10"), 835),
+    Topic("rape", ("rape", "raped", "ধর্ষণ", "sexual assault", "sexually assault"), (
+        ActRef(WOMEN_CHILD, ("9",), 835),
+        ActRef(PENAL, ("376",), 11),
+    )),
+    Topic("sexual harassment", ("sexual harass", "যৌন হয়রানি", "যৌন নিপীড়ন", "যৌন পীড়ন",
+                                "eve teas", "ইভটিজিং"), (
+        ActRef(WOMEN_CHILD, ("10",), 835),
     )),
     Topic("child marriage", ("child marriage", "underage marriage", "বাল্যবিবাহ",
                              "বাল্য বিবাহ"), (
@@ -244,23 +248,25 @@ class TopicIndex:
 
 
 def pin_topic_sections(hits: list[Hit], pinned: list[Hit], k: int, slots: int) -> list[Hit]:
-    """Give up to `slots` governing sections a place in the top k, after any requested section.
+    """Make sure up to `slots` governing sections are in the top k.
 
-    At least two places stay with the search, so a question the table misreads
-    still gets what retrieval found.
+    A governing section the search already ranked in the top k stays where it
+    is. The others take the last places, so the search's own best hits keep the
+    first ones: measured on the full index, putting the table's sections first
+    raised recall but pushed bge-m3's correct first hit down (MRR 0.78 -> 0.73).
+    At least two places always stay with the search.
     """
     slots = min(slots, max(k - 2, 1), len(pinned))
+    top_k = hits[:k]
     if slots <= 0:
-        return hits[:k]
-    requested = [h for h in hits if h.metadata.get("requested")]
-    chosen = [h for h in pinned if h.chunk_id not in {r.chunk_id for r in requested}][:slots]
-    taken = {h.chunk_id for h in requested} | {h.chunk_id for h in chosen}
-    # A governing section the search also found keeps its own (real) score.
-    found = {h.chunk_id: h for h in hits}
-    top = max((h.score for h in hits), default=1.0)
-    chosen = [Hit(h.chunk_id, found[h.chunk_id].score if h.chunk_id in found else top,
-                  h.text, h.body, {**(found[h.chunk_id].metadata if h.chunk_id in found
-                                      else h.metadata), "topic": h.metadata["topic"]})
-              for h in chosen]
-    rest = [h for h in hits if h.chunk_id not in taken]
-    return (requested + chosen + rest)[:k]
+        return top_k
+    in_top = {h.chunk_id for h in top_k}
+    requested = {h.chunk_id for h in hits if h.metadata.get("requested")}
+    chosen = [h for h in pinned if h.chunk_id not in requested][:slots]
+    topic = {h.chunk_id: h.metadata["topic"] for h in chosen}
+    missing = [h for h in chosen if h.chunk_id not in in_top]
+    kept = [h for h in hits if h.chunk_id not in topic or h.chunk_id in in_top][:k - len(missing)]
+    floor = kept[-1].score if kept else 1.0
+    return ([Hit(h.chunk_id, h.score, h.text, h.body, {**h.metadata, "topic": topic[h.chunk_id]})
+             if h.chunk_id in topic else h for h in kept]
+            + [Hit(h.chunk_id, floor, h.text, h.body, h.metadata) for h in missing])

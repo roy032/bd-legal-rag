@@ -106,16 +106,19 @@ class TestPinning(unittest.TestCase):
         found = [self.hit(f"s{i}", 1 - i / 10) for i in range(5)]
         pins = [self.hit(f"p{i}", 0.0, topic="t") for i in range(4)]
         out = pin_topic_sections(found, pins, k=5, slots=3)
-        self.assertEqual([h.chunk_id for h in out], ["p0", "p1", "p2", "s0", "s1"])
+        self.assertEqual([h.chunk_id for h in out], ["s0", "s1", "p0", "p1", "p2"])
         out = pin_topic_sections(found, pins, k=3, slots=3)
-        self.assertEqual([h.chunk_id for h in out], ["p0", "s0", "s1"])
+        self.assertEqual([h.chunk_id for h in out], ["s0", "s1", "p0"])
+        self.assertEqual([round(h.score, 2) for h in out], [1.0, 0.9, 0.9])   # stays monotone
 
     def test_requested_section_stays_first_and_found_pins_keep_their_score(self):
-        found = [self.hit("req", 2.0, requested=True), self.hit("s0", 0.9), self.hit("p0", 0.4)]
-        out = pin_topic_sections(found, [self.hit("p0", 0.0, topic="t")], k=3, slots=3)
-        self.assertEqual([h.chunk_id for h in out], ["req", "p0", "s0"])
-        self.assertEqual(out[1].score, 0.4)
-        self.assertEqual(out[1].metadata["topic"], "t")
+        found = [self.hit("req", 2.0, requested=True), self.hit("s0", 0.9), self.hit("p0", 0.4),
+                 self.hit("s1", 0.3)]
+        out = pin_topic_sections(found, [self.hit("p0", 0.0, topic="t"), self.hit("p1", 0.0, topic="t")],
+                                 k=4, slots=3)
+        self.assertEqual([h.chunk_id for h in out], ["req", "s0", "p0", "p1"])
+        self.assertEqual(out[2].score, 0.4)                # found by the search: keeps its place
+        self.assertEqual(out[2].metadata["topic"], "t")
 
 
 class TestPipeline(unittest.TestCase):
@@ -132,8 +135,9 @@ class TestPipeline(unittest.TestCase):
         q = "কেউ আমার নামে বদনাম ছড়াচ্ছে, আমি কী করব?"     # Bangla question, English act
         off = [h.chunk_id for h in self.pipeline().search(q, k=4)]
         on = [h.chunk_id for h in self.pipeline(topics=True).search(q, k=4)]
-        self.assertEqual(on[:2], ["11:499", "11:500"])
-        self.assertNotIn("11:499", off[:2])
+        self.assertIn("11:499", on)
+        self.assertIn("11:500", on)
+        self.assertNotIn("11:500", off)
 
     def test_named_section_switches_topics_off(self):
         p = self.pipeline(topics=True, resolve_refs=True)
