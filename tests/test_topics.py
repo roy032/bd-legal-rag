@@ -67,6 +67,13 @@ class TestMatching(unittest.TestCase):
         for question, topic in cases.items():
             self.assertIn(topic, [t.name for t in match_topics(question)], question)
 
+    def test_two_part_topics_need_both_words(self):
+        names = lambda q: [t.name for t in match_topics(q)]  # noqa: E731
+        self.assertIn("contract fraud", names("প্রতারণা করে সম্মতি আদায় করা হলে চুক্তির কী হয়?"))
+        self.assertNotIn("contract fraud", names("Can a minor sign a contract?"))
+        self.assertEqual(names("সন্তান কি বাবা-মায়ের ভরণপোষণ দিতে বাধ্য?")[0], "parent maintenance")
+        self.assertEqual(names("আমার স্বামী ভরণপোষণ দেয় না"), ["maintenance"])
+
     def test_no_false_positives_from_substrings(self):
         for question in ("what is the first step", "a firm's duty", "আত্মহত্যার প্ররোচনা",
                          "the current insurance law", "বীমা আইনের সংজ্ঞা"):

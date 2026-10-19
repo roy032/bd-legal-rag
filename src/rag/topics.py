@@ -17,11 +17,11 @@ the bdlaws act id as a hint) and the sections a lawyer would open first. The
 pipeline looks those sections up and gives them reserved places in the
 results, next to whatever the search found.
 
-Section numbers marked VERIFIED are the gold sections of data/eval/eval_scenarios.jsonl,
-checked against the full index. The others are the standard provisions for the
-topic; `bdrag topics` prints what each one resolves to in your index, so a
-wrong number shows up as a wrong section title, not as a silent miss.
-A number that does not exist in the index adds nothing.
+Sections marked VERIFIED are also gold sections of data/eval/eval_scenarios.jsonl.
+Every number here was checked against the full index on 2026-10-19 with
+`bdrag topics` (43,966 chunks): each resolves to the section its topic means.
+Re-run it after a re-ingest; a wrong number shows up as a wrong section title,
+and a number that does not exist in the index adds nothing.
 """
 from __future__ import annotations
 
@@ -46,12 +46,23 @@ class Topic:
     name: str
     triggers: tuple[str, ...]         # word prefixes (Bangla case endings attach); "x!" = whole word
     acts: tuple[ActRef, ...]
+    also: tuple[str, ...] = ()        # if set, the question must contain one of these too
     pattern: re.Pattern = field(init=False, repr=False, compare=False)
+    also_pattern: re.Pattern | None = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        alts = "|".join(re.escape(_norm(t[:-1])) + r"(?![\wঀ-৿])" if t.endswith("!")
-                        else re.escape(_norm(t)) for t in self.triggers)
-        object.__setattr__(self, "pattern", re.compile(rf"(?<![\wঀ-৿])(?:{alts})"))
+        object.__setattr__(self, "pattern", _compile(self.triggers))
+        object.__setattr__(self, "also_pattern", _compile(self.also) if self.also else None)
+
+    def matches(self, normalised_question: str) -> bool:
+        return bool(self.pattern.search(normalised_question)) and (
+            self.also_pattern is None or bool(self.also_pattern.search(normalised_question)))
+
+
+def _compile(terms: tuple[str, ...]) -> re.Pattern:
+    alts = "|".join(re.escape(_norm(t[:-1])) + r"(?![\wঀ-৿])" if t.endswith("!")
+                    else re.escape(_norm(t)) for t in terms)
+    return re.compile(rf"(?<![\wঀ-৿])(?:{alts})")
 
 
 PENAL = ("penal code", "দণ্ডবিধি")
@@ -108,9 +119,9 @@ TOPICS: tuple[Topic, ...] = (
     Topic("maternity", ("maternity", "pregnan", "প্রসূতি", "মাতৃত্ব", "গর্ভবতী"), (
         ActRef(LABOUR, ("45", "46"), 952),
     )),
-    Topic("rent", ("landlord", "tenant", "rent", "বাড়িওয়ালা", "বাড়িওয়ালা", "ভাড়াটিয়া",
-                   "ভাড়াটে", "বাসা ভাড়া", "বাড়ি ভাড়া", "ভাড়া"), (
-        ActRef(("বাড়ি ভাড়া নিয়ন্ত্রণ আইন", "premises rent control"),
+    Topic("rent", ("landlord", "tenant", "rent", "বাড়িওয়ালা", "বাড়ীওয়ালা", "ভাড়াটিয়া",
+                   "ভাড়াটে", "বাসা ভাড়া", "বাড়ি ভাড়া", "বাড়ী ভাড়া", "ভাড়া"), (
+        ActRef(("বাড়ী ভাড়া নিয়ন্ত্রণ আইন", "বাড়ি ভাড়া নিয়ন্ত্রণ আইন", "premises rent control"),
                ("7", "18", "23", "10"), 748),                                    # 7, 18, 23 VERIFIED
     )),
     Topic("land dispossession", ("dispossess", "grabbed my land", "land grab",
@@ -122,7 +133,10 @@ TOPICS: tuple[Topic, ...] = (
     Topic("divorce", ("divorce", "talaq", "তালাক", "ডিভোর্স"), (
         ActRef(MFLO, ("7",)),
     )),
-    Topic("maintenance", ("maintenance", "ভরণপোষণ", "খোরপোশ", "দেনমোহর", "dower", "mohr"), (
+    Topic("parent maintenance", ("maintenance", "ভরণপোষণ", "ভরণ-পোষণ", "look after", "দেখাশোনা"), (
+        ActRef(("পিতা মাতার ভরণ পোষণ আইন", "maintenance of parents"), ("3", "5", "7"), 1132),
+    ), also=("parent", "father", "mother", "elderly", "বাবা", "পিতা", "মা-বাবা", "মাতা")),
+    Topic("maintenance", ("maintenance", "ভরণপোষণ", "ভরণ-পোষণ", "খোরপোশ", "দেনমোহর", "dower", "mohr"), (
         ActRef(MFLO, ("9",)),
     )),
     Topic("second marriage", ("second marriage", "polygam", "দ্বিতীয় বিয়ে", "দ্বিতীয় বিবাহ"), (
@@ -134,6 +148,11 @@ TOPICS: tuple[Topic, ...] = (
     Topic("theft", ("theft", "stole", "stolen", "চুরি"), (
         ActRef(PENAL, ("378", "379"), 11),
     )),
+    # Fraud that induced an agreement is a contract question first, a crime second.
+    Topic("contract fraud", ("contract", "agreement", "চুক্তি", "সম্মতি"), (
+        ActRef(("the contract act", "চুক্তি আইন"), ("17", "19"), 26),
+    ), also=("fraud", "cheat", "deceiv", "misrepresent", "coerc", "প্রতারণা", "জবরদস্তি",
+             "মিথ্যা বর্ণনা")),
     Topic("cheating", ("cheat", "fraud", "scam", "প্রতারণা", "প্রতারক", "ঠকিয়ে", "ঠকিয়েছে"), (
         ActRef(PENAL, ("415", "420"), 11),
     )),
@@ -144,6 +163,7 @@ TOPICS: tuple[Topic, ...] = (
         ActRef(PENAL, ("319", "323", "325"), 11),
     )),
     Topic("arrest", ("arrest", "detained", "গ্রেপ্তার", "গ্রেফতার", "আটক"), (
+        ActRef(("constitution of the people", "গণপ্রজাতন্ত্রী বাংলাদেশের সংবিধান"), ("33",), 367),
         ActRef(CRPC, ("54", "61")),
     )),
     Topic("bail", ("bail", "জামিন"), (
@@ -167,15 +187,17 @@ TOPICS: tuple[Topic, ...] = (
     Topic("narcotics", ("narcotic", "drugs", "yaba", "মাদক", "ইয়াবা"), (
         ActRef(("মাদকদ্রব্য নিয়ন্ত্রণ আইন", "narcotics control"),),
     )),
-    Topic("road accident", ("road accident", "hit by a", "সড়ক দুর্ঘটনা", "গাড়ি চাপা"), (
-        ActRef(("সড়ক পরিবহন আইন", "road transport act"),),
+    Topic("road accident", ("road accident", "hit by a", "rash driving", "সড়ক দুর্ঘটনা",
+                            "গাড়ি চাপা", "বেপরোয়া গাড়ি"), (
+        ActRef(PENAL, ("279", "304A", "304B"), 11),
+        ActRef(("সড়ক পরিবহন আইন", "road transport act"),),     # not in the 2026-10 index
     )),
 )
 
 
 def match_topics(question: str, topics: tuple[Topic, ...] = TOPICS) -> list[Topic]:
     q = _norm(nfc(question))
-    return [t for t in topics if t.pattern.search(q)]
+    return [t for t in topics if t.matches(q)]
 
 
 class TopicIndex:
