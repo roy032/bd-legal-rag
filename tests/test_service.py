@@ -358,6 +358,34 @@ class TestServiceImprovements(unittest.TestCase):
         self.assertEqual(again["answer"], first["answer"])
         self.assertEqual(c.get("/a/deadbeef").status_code, 404)
 
+    def test_shared_link_opened_in_a_browser_gets_the_page(self):
+        c = self.client()
+        answer_id = c.post("/ask", json={"question": "হত্যার শাস্তি কী?"}).json()["id"]
+        page = c.get(f"/a/{answer_id}", headers={"accept": "text/html,application/xhtml+xml,*/*"})
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("text/html", page.headers["content-type"])
+        data = c.get(f"/a/{answer_id}", headers={"accept": "application/json"})
+        self.assertEqual(data.json()["id"], answer_id)
+
+    def test_ui_assets_are_served(self):
+        c = self.client()
+        for path in ("/static/app.js", "/static/app.css", "/static/favicon.svg",
+                     "/static/fonts/noto-sans-bengali-bengali-400-normal.woff2"):
+            self.assertEqual(c.get(path).status_code, 200, path)
+
+    def test_stream_rejects_an_overlong_question(self):
+        r = self.client().post("/ask/stream", json={"question": "x" * 501})
+        self.assertEqual(r.status_code, 400)
+
+    def test_framing_is_denied_unless_a_site_is_named(self):
+        closed = self.client().get("/")
+        self.assertEqual(closed.headers["x-frame-options"], "DENY")
+        self.assertIn("frame-ancestors 'none'", closed.headers["content-security-policy"])
+        space = self.client(frame_ancestors="https://huggingface.co").get("/")
+        self.assertNotIn("x-frame-options", space.headers)
+        self.assertIn("frame-ancestors 'self' https://huggingface.co",
+                      space.headers["content-security-policy"])
+
     def test_multi_hop_question_is_routed_to_the_agent(self):
         script = iter(['ACTION: {"tool": "search", "args": {"query": "হত্যা", "k": 1}}',
                        "ANSWER: পার্থক্য এই [1]।"])

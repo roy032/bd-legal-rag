@@ -34,7 +34,12 @@ the statute text with the section cited. Source: https://github.com/roy032/bd-le
    - optional: `BDRAG_DAILY_LIMIT` (default 500 answers a day across all visitors) to stay
      inside the free tier's quota; `BDRAG_RERANK=cross` with `BDRAG_RERANK_PRECISION=int8`
      to turn on the reranker (a few seconds more per answer on the 2-vCPU Space)
+   - optional: `BDRAG_REF` = the branch or tag to serve (default `main`)
    Without a model the Space still returns the matching sections, just no written answer.
+4. Optional, keep it in sync automatically: in the GitHub repo add the Actions variable
+   `HF_SPACE` = `<you>/<space-name>` and the secret `HF_TOKEN` (write access). The
+   "Deploy to Hugging Face Space" workflow then re-uploads these files and rebuilds the
+   Space on every push to `main`.
 
 The first start downloads bge-m3 (~2.3 GB) and takes a few minutes. Free Spaces
 sleep after 48 hours without visitors and wake on the next visit. Questions and
