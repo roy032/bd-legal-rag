@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bd-legal-rag"
-version = "1.0.0"
+version = "1.1.0"
 description = "Bilingual (Bangla + English) RAG over the statutes of Bangladesh"
 readme = "README.md"
 requires-python = ">=3.10"

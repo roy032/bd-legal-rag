@@ -12,3 +12,8 @@ kaggle_upload/
 results/finish.log
 *.egg-info/
 .coverage
+.ruff_cache/
+.mypy_cache/
+build/
+dist/
+.env

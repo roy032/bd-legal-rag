@@ -4,6 +4,14 @@ A bilingual (Bangla + English) retrieval-augmented question answering system ove
 statutes of Bangladesh. Ask in either language, get an answer grounded in the text of the
 Acts with the section cited — or an honest refusal when the corpus does not answer.
 
+![The answer page: a Bangla question, a cited answer, and the statute excerpts beside it](docs/screenshots/v2-answer-desktop.png)
+
+<p align="center">
+  <img src="docs/screenshots/v2-home-mobile-bn.png" width="30%" alt="Home page on a phone, in Bangla">
+  <img src="docs/screenshots/v2-answer-mobile-bn.png" width="30%" alt="A cited Bangla answer on a phone">
+  <img src="docs/screenshots/v2-guidance.png" width="30%" alt="Labelled general guidance when the indexed laws do not answer">
+</p>
+
 ```
                     ┌──────────── ingestion (offline) ───────────┐
  bdlaws.minlaw.gov.bd → parse Act/Chapter/Section → chunk + metadata → chunks.jsonl
@@ -55,7 +63,7 @@ An agent mode sits alongside the single-shot path: the model calls `search`,
 
 ```bash
 pip install -e ".[serve]"     # or: make install
-make test                     # 317 tests, all offline — no API key, no model download
+make test                     # every test runs offline — no API key, no model download
 make demo                     # full pipeline + ablation on the bundled sample corpus
 make serve                    # API + UI on :8000
 ```
@@ -157,11 +165,38 @@ layer (split conjuncts); `--ocr always` often reads those better than the text l
 | Evaluation | `src/evalkit/` | labelled set, confidence intervals, paired tests, failure taxonomy, ablation tables |
 | Service | `src/service/` | HTTP API, SSE streaming, cache, rate limit, API keys, metrics, cost, tracing, UI |
 
-Command-line entry points live in `scripts/`; `make help` lists them. Design
-decisions are recorded in `docs/adr/`, the corpus is described in
-`docs/DATA_CARD.md`, `docs/RUNBOOK_WINDOWS.md` walks through the full run on a
-Windows laptop, and `IMPROVEMENTS.md` / `IMPLEMENTED.md` track what is done and
-what is deliberately left.
+Every tool is a `bdrag <command>` (code in `src/bdrag_tools/`; `bdrag --help` lists
+them). `scripts/*.py` are thin wrappers kept so older commands and the `.bat` files
+still work, and `make help` lists the common targets.
+
+```
+src/ingest/        scrape, parse, chunk, PDF/OCR ingest
+src/rag/           retrieval, prompts, guardrails, agent, topics, CLI (`bdrag`)
+src/evalkit/       metrics, judge, failure taxonomy, reports
+src/service/       Starlette API + streaming web UI (static/)
+src/bdrag_tools/   the bdrag subcommands (index, eval, e2e, ablate, doctor, ...)
+scripts/           wrappers for the above, plus finish.py / kagglerun.py
+data/eval/         evaluation, tuning, scenario and adversarial question sets
+data/sample/       small corpus used by the tests, the demo and CI
+results/           measured numbers behind the tables below
+deploy/hf-space/   free Hugging Face Space deployment
+kaggle/            GPU index build on Kaggle
+docs/              ADRs, data card, Windows runbook, build notes, reports
+tests/             offline test suite
+```
+
+## Documentation
+
+| Document | What is in it |
+|---|---|
+| [docs/RUNBOOK_WINDOWS.md](docs/RUNBOOK_WINDOWS.md) | the full run on a Windows laptop, from downloaded pages to evaluated system |
+| [docs/DATA_CARD.md](docs/DATA_CARD.md) | what the corpus contains and leaves out |
+| [docs/adr/](docs/adr/) | design decisions, one file each |
+| [docs/BUILD_NOTES.md](docs/BUILD_NOTES.md) | the build log, phase by phase |
+| [docs/reports/](docs/reports/README.md) | dated reports: free answering models, upgrade plan, comparison with a similar project |
+| [results/](results/RESULTS.md) | measured results; [topic table check](results/topics-full-index-2026-10-19.md) |
+| [IMPROVEMENTS.md](IMPROVEMENTS.md) / [IMPLEMENTED.md](IMPLEMENTED.md) | what is still open, and what was done |
+| [CHANGELOG.md](CHANGELOG.md) | what changed, release by release |
 
 ## Results
 
@@ -344,8 +379,8 @@ recall@5 below the committed baseline fails the build.
 start script and Space README for the free CPU tier (16 GB RAM, enough for bge-m3).
 Push the index to a dataset repo once with `python scripts/sync_index.py push --repo
 <you>/bdrag-index --private`, set `BDRAG_INDEX_REPO` on the Space, and pick a free
-answering model (Groq or Gemini through `RAG_LLM=openai` + `OPENAI_BASE_URL`); the steps
-are in `deploy/hf-space/README.md`.
+answering model (`RAG_LLM=groq` or `RAG_LLM=gemini` with the key as a Space secret); the
+steps are in [`deploy/hf-space/README.md`](deploy/hf-space/README.md).
 
 The service is built on Starlette, the ASGI toolkit FastAPI is built on, to keep one
 small dependency; porting the handlers to FastAPI is mechanical if you want pydantic
@@ -353,8 +388,11 @@ models and generated OpenAPI docs.
 
 ## Scope, limits, and the legal bit
 
-- **This is not legal advice**, and the UI says so on every answer. It reports what the
-  retrieved statutory text says, nothing more.
+- **This is not legal advice**, and the UI says so on every answer. A cited answer reports
+  what the retrieved statutory text says and how it applies to the facts given. When the
+  indexed laws have nothing on the question, the reply is visibly labelled general
+  guidance, cites nothing, and points to legal aid (hotline 16430);
+  `BDRAG_GENERAL_FALLBACK=false` turns that off and restores the plain refusal.
 - The corpus is public legislation published by the Ministry of Law. The scraper
   identifies itself, rate-limits to one request per second, and caches everything so it
   never re-fetches. Put your own contact address in `src/ingest/fetch.py`.

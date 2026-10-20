@@ -4,7 +4,7 @@ Every item from `IMPROVEMENTS.md`, and what happened to it. "Done" means
 implemented **and** covered by a test that runs offline in this repository.
 "Partial" and "Not done" say why, in one line, without dressing it up.
 
-Suite: **202 tests**, ruff clean, every `src/` module exercised.
+Suite: ruff clean, mypy clean, every `src/` module exercised.
 
 ## Tier 0 — defects in the first release
 
