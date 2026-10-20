@@ -3,6 +3,18 @@
 Newest first. Measured numbers live in [results/](results/RESULTS.md); what is still
 open is in [IMPROVEMENTS.md](IMPROVEMENTS.md).
 
+## Unreleased
+
+### Retrieval
+- The topic table now also catches unpaid wages, a purchase gone wrong and defamation
+  when people describe them in their own words ("my boss hasn't paid me", "the seller
+  won't take it back", "telling everyone I am a thief"), not only with the trigger
+  words. Each new entry needs a second word that places it (a job, a faulty purchase,
+  spreading a lie), so none of the 171 committed eval questions changes topic.
+- `data/eval/eval_gaps.jsonl`: 13 paraphrased gap questions (English and Bangla),
+  written before the new entries. `bdrag measure-upgrades` runs it and now measures
+  `served` with the topic table, as the service runs it (use `--redo`).
+
 ## 1.1.0 — 2026-10-20
 
 Combines the work that was spread across pull requests #1 to #6 into one branch.
