@@ -149,6 +149,18 @@ class TestPromptAndCitations(unittest.TestCase):
         self.assertEqual(order[-1], "b")  # second best
         self.assertEqual(sorted(order), sorted(h.chunk_id for h in self.hits))
 
+    def test_requested_section_is_labelled_and_stays_first(self):
+        from rag.prompts import ACTIVE_ANSWER_SYSTEM
+        hits = list(self.hits)
+        last = hits[-1]
+        hits[-1] = Hit(last.chunk_id, last.score, last.text, last.body,
+                       {**last.metadata, "requested": True})
+        order = reorder_sandwich([hits[-1]] + hits[:-1])
+        self.assertEqual(order[0].chunk_id, last.chunk_id)
+        self.assertIn("[REQUESTED SECTION]", format_context(order[:1]))
+        self.assertNotIn("[REQUESTED SECTION]", format_context(self.hits[:1]))
+        self.assertIn("[REQUESTED SECTION]", ACTIVE_ANSWER_SYSTEM.text)
+
     def test_prompt_language_reminder(self):
         self.assertIn("বাংলায়", build_prompt("হত্যার শাস্তি কী?", self.hits[:2]))
         self.assertIn("in English", build_prompt("What is the punishment?", self.hits[:2]))

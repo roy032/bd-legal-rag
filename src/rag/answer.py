@@ -1,6 +1,7 @@
 """Prompt construction, grounded generation, and citation checking."""
 from __future__ import annotations
 
+import os
 import re
 import time
 from dataclasses import dataclass, field
@@ -10,8 +11,15 @@ from ingest.textutils import bn_to_ascii_digits, detect_lang
 from .confidence import confidence
 from .guardrails import GuardConfig, repair_instruction, run_checks, support_gate
 from .llm import LLM, LLMError
-from .prompts import ACTIVE_ANSWER_SYSTEM
-from .scope import OFF_TOPIC_REPLY, apply_notices, classify_request, wrap_untrusted
+from .prompts import ACTIVE_ANSWER_SYSTEM, GENERAL_GUIDANCE_V1
+from .scope import (
+    GENERAL_LABEL,
+    LEGAL_AID_NOTICE,
+    OFF_TOPIC_REPLY,
+    apply_notices,
+    classify_request,
+    wrap_untrusted,
+)
 from .store import Hit
 
 SYSTEM = ACTIVE_ANSWER_SYSTEM.text
@@ -70,6 +78,7 @@ class Answer:
     repaired: bool = False                       # a corrective re-prompt was needed
     abstained: bool = False                      # refused before calling the model
     llm_calls: int = 0
+    general: bool = False                        # labelled general guidance, not grounded
 
     @property
     def failures(self) -> list[str]:
@@ -77,14 +86,45 @@ class Answer:
 
     @property
     def sources(self) -> list[dict]:
-        return [
-            {"n": n, "citation": h.citation, "chunk_id": h.chunk_id,
-             "url": h.metadata.get("url"), "score": round(h.score, 4)}
-            for n, h in enumerate(self.hits, 1) if n in self.cited
-        ]
+        return [{**source_card(n, h), "chunk_id": h.chunk_id}
+                for n, h in enumerate(self.hits, 1) if n in self.cited]
 
 
-def format_context(hits: list[Hit], max_chars: int = 1500) -> str:
+_YEAR = re.compile(r"(?<![0-9০-৯])([12০১২][0-9০-৯]{3})(?![0-9০-৯])")
+
+
+def amendment_label(metadata: dict) -> str | None:
+    """"amended (latest 2019)" from a section's footnotes; "amended" when they name no year.
+
+    bdlaws prints each change as a footnote naming the amending act ("বীমা (সংশোধন)
+    আইন, ২০১৯ দ্বারা প্রতিস্থাপিত"), so the latest year there is the newest change
+    this copy of the text reflects. None for a section never amended.
+    """
+    if not metadata.get("amended"):
+        return None
+    years = [int(bn_to_ascii_digits(y)) for note in metadata.get("footnotes") or []
+             for y in _YEAR.findall(note)]
+    years = [y for y in years if 1800 <= y <= 2100]
+    return f"amended (latest {max(years)})" if years else "amended"
+
+
+def source_card(n: int, h: Hit, max_chars: int = 1200) -> dict:
+    """What the UI shows for one excerpt: enough to read it without leaving the page."""
+    m = h.metadata
+    return {"n": n, "citation": h.citation, "url": m.get("url"), "score": round(h.score, 4),
+            "section_title": m.get("section_title"), "act_title": m.get("act_title"),
+            "amended": amendment_label(m), "repealed": bool(m.get("repealed")),
+            "text": h.body[:max_chars]}
+
+
+# Characters of each excerpt the model sees. On a CPU, reading the prompt is most
+# of the wait before the first token (five Bangla excerpts are 3-4k tokens), so a
+# laptop can trade a little context for speed: RAG_EXCERPT_CHARS=1000.
+EXCERPT_CHARS = int(os.environ.get("RAG_EXCERPT_CHARS") or "1500")
+
+
+def format_context(hits: list[Hit], max_chars: int | None = None) -> str:
+    max_chars = max_chars or EXCERPT_CHARS
     blocks = []
     for n, h in enumerate(hits, 1):
         m = h.metadata
@@ -93,8 +133,10 @@ def format_context(hits: list[Hit], max_chars: int = 1500) -> str:
             head += f" — {m['section_title']}"
         if m.get("chapter"):
             head += f" ({m['chapter']})"
-        if m.get("amended"):
-            head += " [amended]"
+        if m.get("requested"):
+            head += " [REQUESTED SECTION]"
+        if (label := amendment_label(m)):
+            head += f" [{label}]"
         if m.get("repealed"):
             head += " [REPEALED ACT]"
         body = h.body[:max_chars]
@@ -109,8 +151,11 @@ def reorder_sandwich(hits: list[Hit]) -> list[Hit]:
     ('lost in the middle'). Make this a flag, then measure whether it
     actually helps on your evaluation set — don't take it on faith.
     """
+    # The section the question names always stays first, in its own order.
+    requested = [h for h in hits if h.metadata.get("requested")]
+    rest = [h for h in hits if not h.metadata.get("requested")]
     # hits come in ranked order: [1,2,3,4,5] -> [1,3,5,4,2]
-    return list(hits[0::2]) + list(hits[1::2])[::-1]
+    return requested + list(rest[0::2]) + list(rest[1::2])[::-1]
 
 
 def build_prompt(question: str, hits: list[Hit], sandwich: bool = True) -> str:
@@ -123,6 +168,43 @@ def build_prompt(question: str, hits: list[Hit], sandwich: bool = True) -> str:
         f"{format_context(ordered)}\n\n---\n{wrap_untrusted(question)}\n\n{reminder}\n"
         f"Answer using only the excerpts above, citing them as [n]."
     )
+
+
+def general_guidance(question: str, llm: LLM) -> str | None:
+    """General orientation for a question the corpus cannot answer, labelled as such.
+
+    The label goes first and the legal-aid note last, added here rather than
+    asked of the model, so neither depends on a small model following orders.
+    None when the model fails or says nothing: the caller keeps its refusal.
+    """
+    lang = "bn" if detect_lang(question) == "bn" else "en"
+    reminder = ("প্রশ্নটি বাংলায়, তাই উত্তরও বাংলায় দিন।" if lang == "bn"
+                else "The question is in English; answer in English.")
+    try:
+        text = llm(GENERAL_GUIDANCE_V1.text, f"{wrap_untrusted(question)}\n\n{reminder}")
+    except LLMError:
+        return None
+    # No excerpts were shown, so a [n] can only be invented; a NOT_FOUND here is noise.
+    text = _LOOSE_CITE.sub("", normalize_answer(text))
+    text = _REFUSAL_HEAD.sub("", text).strip()
+    if not text:
+        return None
+    return GENERAL_LABEL[lang] + text + LEGAL_AID_NOTICE[lang]
+
+
+def with_general_guidance(answer: Answer, llm: LLM | None, guard: GuardConfig) -> Answer:
+    """Swap a refusal for general guidance when the service asks for it."""
+    if not (guard.general_fallback and llm and answer.refused):
+        return answer
+    t0 = time.perf_counter()
+    text = general_guidance(answer.question, llm)
+    if text is None:
+        return answer
+    return Answer(answer.question, text, answer.hits, refused=False, abstained=answer.abstained,
+                  latency_s=answer.latency_s + time.perf_counter() - t0,
+                  checks={**answer.checks, "confidence": None, "general_guidance": True,
+                          "grounded_reply": answer.text, "prompt_id": GENERAL_GUIDANCE_V1.id},
+                  llm_calls=answer.llm_calls + 1, general=True)
 
 
 def check_citations(text: str, n_hits: int) -> tuple[list[int], list[int]]:
@@ -178,15 +260,14 @@ def answer_question_stream(question: str, retriever, stream_llm, k: int = 5,
     ok, why = support_gate(hits, guard)
     if not ok:
         answer = Answer(question, f"{REFUSAL_MARK}: {why}", hits, refused=True, abstained=True,
-                        latency_s=time.perf_counter() - t0)
-        yield {"type": "final", "answer": answer}
+                        latency_s=time.perf_counter() - t0, checks={"scope": flags})
+        if guard.general_fallback and repair_llm:
+            yield {"type": "status", "stage": "general_guidance"}
+        yield {"type": "final", "answer": with_general_guidance(answer, repair_llm, guard)}
         return
 
     ordered = reorder_sandwich(hits) if sandwich and len(hits) > 2 else hits
-    yield {"type": "sources", "sources": [
-        {"n": n, "citation": h.citation, "url": h.metadata.get("url"),
-         "score": round(h.score, 4), "section_title": h.metadata.get("section_title")}
-        for n, h in enumerate(ordered, 1)]}
+    yield {"type": "sources", "sources": [source_card(n, h) for n, h in enumerate(ordered, 1)]}
 
     yield {"type": "status", "stage": "answering"}
     prompt = build_prompt(question, ordered, sandwich=False)
@@ -221,8 +302,12 @@ def answer_question_stream(question: str, retriever, stream_llm, k: int = 5,
     conf = (None if refused else
             confidence(ordered, cited, {**checks, "repaired": repaired},
                        entailment=checks.get("entailment")))
-    yield {"type": "final", "answer": Answer(
+    answer = Answer(
         question=question, text=text, hits=ordered, cited=cited, invalid_citations=invalid,
         refused=refused, latency_s=time.perf_counter() - t0,
         checks={**checks, "confidence": conf, "scope": flags, "prompt_id": SYSTEM_ID},
-        repaired=repaired, llm_calls=2 if repaired else 1)}
+        repaired=repaired, llm_calls=2 if repaired else 1)
+    if refused and guard.general_fallback and repair_llm:
+        # The streamed draft was a refusal; the final text replaces it.
+        yield {"type": "status", "stage": "general_guidance"}
+    yield {"type": "final", "answer": with_general_guidance(answer, repair_llm, guard)}

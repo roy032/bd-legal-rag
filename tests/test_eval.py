@@ -113,6 +113,11 @@ class TestDataset(unittest.TestCase):
         self.assertEqual(stats["unanswerable"], 1)
         self.assertEqual(stats["n"], stats["answerable"] + stats["unanswerable"])
 
+    def test_committed_eval_files_validate(self):
+        for name in ("eval.jsonl", "tune.jsonl", "eval_scenarios.jsonl", "eval_v2_draft.jsonl"):
+            with self.subTest(name=name):
+                self.assertEqual(validate(load_eval(ROOT / "data/eval" / name)), [])
+
     def test_section_key(self):
         self.assertEqual(section_key({"act_id": 1037, "section_id": 40548}), "1037:40548")
 

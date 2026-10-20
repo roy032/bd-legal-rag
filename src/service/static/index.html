@@ -2,230 +2,165 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bangladesh Law Assistant</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bangladesh Law Assistant · বাংলাদেশ আইন সহায়ক</title>
 <meta name="description" content="Ask questions about the laws of Bangladesh in Bangla or English and get answers grounded in the statutory text, with the section cited.">
-<style>
-  :root {
-    --bg: #fbfaf8; --panel: #fff; --ink: #1b1a17; --muted: #6b675f; --line: #e3ded4;
-    --accent: #1f6f54; --warn: #b4530a; --bad: #a32f2f;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg:#16181a; --panel:#1e2124; --ink:#eceae5; --muted:#9a968e; --line:#2e3236;
-            --accent:#4db38b; --warn:#e0954a; --bad:#e2726b; }
-  }
-  * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--ink);
-         font:16px/1.7 system-ui,-apple-system,"Noto Sans Bengali","Nirmala UI",sans-serif; }
-  :focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
-  @media (prefers-reduced-motion: no-preference) { .pulse { animation: pulse 1.4s infinite; } }
-  @keyframes pulse { 50% { opacity:.45 } }
-  .wrap { max-width: 820px; margin: 0 auto; padding: 24px 16px 64px; }
-  h1 { font-size: 22px; margin: 0 0 4px; }
-  .sub { color: var(--muted); font-size: 14px; margin-bottom: 20px; }
-  form { display:flex; gap:8px; flex-wrap:wrap; }
-  input[type=text] { flex:1 1 320px; padding:12px 14px; border:1px solid var(--line);
-    border-radius:10px; background:var(--panel); color:var(--ink); font-size:16px; }
-  button { padding:12px 18px; border:0; border-radius:10px; background:var(--accent);
-    color:#fff; font-size:15px; cursor:pointer; }
-  button[disabled] { opacity:.55; cursor:progress; }
-  .opts { display:flex; gap:16px; align-items:center; color:var(--muted); font-size:14px;
-    margin:10px 2px 0; flex-wrap:wrap; }
-  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px;
-    padding:16px 18px; margin-top:18px; }
-  .status { color:var(--muted); font-size:14px; }
-  .answer { white-space:pre-wrap; }
-  .badges { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
-  .badge { font-size:12px; padding:3px 9px; border-radius:999px; border:1px solid var(--line);
-    color:var(--muted); }
-  .badge.warn { color:var(--warn); border-color:var(--warn); }
-  .badge.ok { color:var(--accent); border-color:var(--accent); }
-  .badge.bad { color:var(--bad); border-color:var(--bad); }
-  ol.sources { padding-left:20px; margin:8px 0 0; font-size:14px; }
-  ol.sources li { margin-bottom:6px; }
-  a { color:var(--accent); }
-  .foot { color:var(--muted); font-size:13px; margin-top:28px; }
-  .ex { background:none; border:0; color:var(--accent); cursor:pointer; padding:0; font-size:14px; }
-  .conf { font-size:13px; padding:2px 8px; border-radius:999px; border:1px solid var(--line); }
-  .conf.high { color:var(--accent); border-color:var(--accent); }
-  .conf.medium { color:var(--warn); border-color:var(--warn); }
-  .conf.low { color:var(--bad); border-color:var(--bad); }
-  .fb { display:flex; gap:8px; align-items:center; margin-top:14px; font-size:14px; color:var(--muted); }
-  .fb button { background:var(--panel); color:var(--ink); border:1px solid var(--line);
-    padding:4px 12px; font-size:14px; }
-  .trace { font-size:13px; color:var(--muted); margin-top:10px; }
-  .trace li { margin:2px 0; }
-  @media (max-width:600px) { .wrap { padding:16px 12px 48px } h1 { font-size:19px } }
-</style>
+<meta property="og:title" content="Bangladesh Law Assistant · বাংলাদেশ আইন সহায়ক">
+<meta property="og:description" content="Free answers about Bangladeshi law in Bangla or English, every claim cited to the section of the Act.">
+<meta name="theme-color" content="#0b4f3a">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="preload" href="/static/fonts/noto-sans-bengali-bengali-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/static/app.css">
+<script>
+  // Theme and language before first paint, so the page never flashes the wrong one.
+  try {
+    const t = localStorage.getItem("bdrag-theme"); if (t) document.documentElement.dataset.theme = t;
+    const l = localStorage.getItem("bdrag-lang") || ((navigator.language || "").startsWith("bn") ? "bn" : "en");
+    document.documentElement.lang = l;
+  } catch (e) {}
+</script>
 </head>
 <body>
-<div class="wrap">
-  <h1>Bangladesh Law Assistant <span style="font-weight:400">· বাংলাদেশ আইন সহায়ক</span></h1>
-  <div class="sub">Answers grounded in the text of the Acts, with the section cited. Ask in Bangla or English.</div>
-
-  <form id="f">
-    <input type="text" id="q" placeholder="ধারা ৩০২ কী বলে?  /  What is the punishment for negligence?" autocomplete="off">
-    <button id="go" type="submit">Ask</button>
-  </form>
-  <div class="opts">
-    <label><input type="checkbox" id="agent"> multi-step search</label>
-    <label>excerpts <input type="number" id="k" value="5" min="1" max="20" style="width:56px"></label>
-    <span id="examples"></span>
+<a class="skip" href="#q">Skip to the question box</a>
+<header class="top">
+  <div class="wrap bar">
+    <a class="brand" href="/" aria-label="Bangladesh Law Assistant, home">
+      <svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="#0b4f3a"/><circle cx="16" cy="16" r="8" fill="#c8102e"/><path d="M16 7v18M10 11h12M8 19l2-8 2 8a2 2 0 0 1-4 0zm12 0 2-8 2 8a2 2 0 0 1-4 0zM12 25h8" stroke="#fff" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span class="brandtext"><b data-i18n="brand">Bangladesh Law Assistant</b><small data-i18n="brand2">বাংলাদেশ আইন সহায়ক</small></span>
+    </a>
+    <span class="spacer"></span>
+    <div class="seg" role="group" aria-label="Language / ভাষা">
+      <button type="button" data-lang="bn" aria-pressed="false">বাংলা</button>
+      <button type="button" data-lang="en" aria-pressed="false">EN</button>
+    </div>
+    <button type="button" class="iconbtn" id="theme" aria-label="Switch colour theme" title="Theme">
+      <svg class="moon" width="17" height="17" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg>
+      <svg class="sun" width="17" height="17" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="currentColor"/><path stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+    </button>
   </div>
+</header>
 
-  <div class="card" id="out" hidden>
-    <div class="status" id="status"></div>
-    <div class="answer" id="answer"></div>
-    <div class="badges" id="badges"></div>
-    <div id="srcwrap" hidden><strong style="font-size:14px">Sources</strong><ol class="sources" id="sources"></ol></div>
-    <details id="tracewrap" hidden class="trace"><summary>what the agent did</summary><ol id="trace"></ol></details>
-    <div class="fb" id="fbwrap" hidden>
-      <span>Was this useful?</span>
-      <button id="fbup" aria-label="helpful">Yes</button>
-      <button id="fbdown" aria-label="not helpful">No</button>
-      <button id="copy" aria-label="copy link">Copy link</button>
-      <span id="fbmsg" aria-live="polite"></span>
+<section class="hero">
+  <div class="wrap narrow">
+    <p class="eyebrow" data-i18n="eyebrow">Free · Bangla & English · Cited to the section</p>
+    <h1 data-i18n="h1">Ask about Bangladeshi law, in Bangla or English</h1>
+    <p class="lead" data-i18n="lead">Ask what a section says, or describe your situation. Answers come from the text of the Acts, with every claim linked to the section it relies on.</p>
+
+    <form id="f" class="askbox" autocomplete="off">
+      <label for="q" class="sr" data-i18n="qlabel">Your question</label>
+      <textarea id="q" rows="2" maxlength="600" enterkeyhint="send"></textarea>
+      <div class="askrow">
+        <details class="settings" id="settings">
+          <summary><svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 7h10v2H4zm0 8h6v2H4zm12-9h2v4h-2V9h-2V7h2zm-4 8h2v-1h2v4h-2v-1h-2zm6-6h2v2h-2zm-4 8h6v2h-6z"/></svg><span data-i18n="settings">Settings</span></summary>
+          <div class="setgrid">
+            <label><input type="checkbox" id="agent"> <span data-i18n="deep">Deeper search (several lookups, slower)</span></label>
+            <label><span data-i18n="excerpts">Excerpts read</span> <input type="number" id="k" value="5" min="1" max="20"></label>
+            <label id="modelwrap" hidden><span data-i18n="model">Model</span> <select id="model"></select></label>
+            <span id="hosted" class="hosted" hidden data-i18n="hosted">Your question is sent to an outside provider.</span>
+          </div>
+        </details>
+        <span class="count" id="count" aria-live="polite"></span>
+        <span class="kbd" aria-hidden="true" data-i18n="enterhint">Enter to ask · Shift+Enter for a new line</span>
+        <button type="button" class="ghost" id="stop" hidden data-i18n="stop">Stop</button>
+        <button type="submit" class="primary" id="go">
+          <span data-i18n="ask">Ask</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 20.5 21 12 3 3.5v6.6L15 12 3 13.9z"/></svg>
+        </button>
+      </div>
+    </form>
+
+    <ul class="trust">
+      <li><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5 3h10l4 4v14H5zm9 1.5V8h3.5"/></svg><span id="corpusline" data-i18n="trust1">From the official text of Bangladeshi Acts</span></li>
+      <li><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg><span data-i18n="trust2">Every claim cited to a section</span></li>
+      <li><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2 4 5v6c0 5 3.4 9.7 8 11 4.6-1.3 8-6 8-11V5z"/></svg><span data-i18n="trust3">Free, no sign-up</span></li>
+    </ul>
+  </div>
+</section>
+
+<main class="wrap">
+  <div id="banner" class="banner narrow" hidden></div>
+
+  <section class="examples narrow" aria-labelledby="exh">
+    <h2 id="exh" class="kicker" data-i18n="examples">Try a question</h2>
+    <div class="tabs" role="tablist" id="tabs"></div>
+    <div class="exlist" id="exlist" role="tabpanel"></div>
+  </section>
+
+  <section id="result" hidden>
+    <div class="answercol">
+      <h2 class="qecho" id="qecho"></h2>
+      <article class="card answercard" aria-live="polite">
+        <header class="cardhead">
+          <span class="label" data-i18n="answerlabel">Answer</span>
+          <ol class="steps" id="steps" aria-label="progress"></ol>
+          <div class="badges" id="badges"></div>
+        </header>
+        <div id="notice"></div>
+        <div id="skeleton" hidden><div class="skel"></div><div class="skel s2"></div><div class="skel s3"></div><div class="skel s4"></div></div>
+        <div class="answer prose" id="answer"></div>
+        <div id="guidance" class="guidance" hidden>
+          <span class="glabel" data-i18n="glabel">General guidance — not from the indexed law text</span>
+          <div class="prose" id="gtext"></div>
+        </div>
+        <details id="tracewrap" hidden class="trace"><summary data-i18n="trace">What the deeper search did</summary><ol id="trace"></ol></details>
+        <footer class="actions" id="actions" hidden>
+          <div class="fbgroup" role="group">
+            <span class="fbq" data-i18n="useful">Was this useful?</span>
+            <button type="button" class="chip" id="fbup" aria-pressed="false" aria-label="Helpful"><svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M2 21h4V9H2zm20-11a2 2 0 0 0-2-2h-6.3l1-4.6v-.3a1.5 1.5 0 0 0-.5-1L13.2 1 6.6 7.6A2 2 0 0 0 6 9v10a2 2 0 0 0 2 2h9a2 2 0 0 0 1.8-1.2l3-7.1.2-.7z"/></svg><span data-i18n="yes">Yes</span></button>
+            <button type="button" class="chip" id="fbdown" aria-pressed="false" aria-label="Not helpful"><svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M22 3h-4v12h4zM2 14a2 2 0 0 0 2 2h6.3l-1 4.6v.3c0 .4.2.8.5 1.1l1.1 1 6.6-6.6c.4-.4.5-.9.5-1.4V5a2 2 0 0 0-2-2H7a2 2 0 0 0-1.8 1.2l-3 7.1-.2.7z"/></svg><span data-i18n="no">No</span></button>
+          </div>
+          <span class="spacer"></span>
+          <button type="button" class="chip" id="copytext"><svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16 1H4a2 2 0 0 0-2 2v14h2V3h12zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11z"/></svg><span data-i18n="copy">Copy</span></button>
+          <button type="button" class="chip" id="share"><svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M18 16a3 3 0 0 0-2.1.8L8.9 12.7a3 3 0 0 0 0-1.4l7-4A3 3 0 1 0 15 5l-.1.7-7 4a3 3 0 1 0 0 4.6l7.1 4.1-.1.6a3 3 0 1 0 3-3z"/></svg><span data-i18n="share">Share</span></button>
+          <button type="button" class="chip" id="print"><svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19 8H5a3 3 0 0 0-3 3v6h4v4h12v-4h4v-6a3 3 0 0 0-3-3zm-3 11H8v-5h8zM18 3H6v4h12z"/></svg><span data-i18n="print">Print</span></button>
+          <span class="msg" id="fbmsg" aria-live="polite"></span>
+        </footer>
+        <form class="fbform" id="fbform" hidden>
+          <input id="fbcomment" maxlength="1000">
+          <button type="submit" class="chip" data-i18n="send">Send</button>
+        </form>
+      </article>
+    </div>
+
+    <aside class="sourcecol" id="srcwrap" hidden aria-labelledby="srch">
+      <h2 id="srch" class="kicker"><span data-i18n="sources">Sources from the law</span> <span class="srccount" id="srccount"></span></h2>
+      <ol class="sources" id="sources"></ol>
+    </aside>
+  </section>
+
+  <aside class="aid narrow" aria-label="Free legal aid">
+    <div class="aidicon" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24"><path fill="currentColor" d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.2 11.4 11.4 0 0 0 3.6.6 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.3.2 2.5.6 3.6a1 1 0 0 1-.3 1z"/></svg></div>
+    <div class="aidtext">
+      <b data-i18n="aid1">Need help with your own case?</b>
+      <p data-i18n="aid2">Call the government's free legal aid hotline (National Legal Aid Services Organisation), toll-free, or visit the legal aid office at your district judge's court.</p>
+    </div>
+    <a class="phone" href="tel:16430"><span data-i18n="call">Call</span> 16430</a>
+  </aside>
+
+  <section class="history narrow" id="history" hidden aria-labelledby="hish">
+    <div class="histhead"><h2 id="hish" class="kicker" data-i18n="recent">Your recent questions</h2>
+      <button type="button" class="linkbtn" id="hclear" data-i18n="clear">Clear</button></div>
+    <ul id="hlist"></ul>
+  </section>
+</main>
+
+<footer class="site">
+  <div class="wrap narrow">
+    <details>
+      <summary data-i18n="how">How this works</summary>
+      <ol>
+        <li data-i18n="how1">Your question is matched against the sections of Bangladeshi Acts published on the Laws of Bangladesh website, in Bangla and English.</li>
+        <li data-i18n="how2">The closest sections are given to a language model, which answers only from them and cites each claim as [n].</li>
+        <li data-i18n="how3">Automatic checks confirm every citation points to a real excerpt. If the law text does not cover the question, it says so.</li>
+      </ol>
+    </details>
+    <p data-i18n="disclaimer">Informational only, not legal advice. Laws change: always check the official text before relying on anything here.</p>
+    <div class="row">
+      <a href="http://bdlaws.minlaw.gov.bd/" target="_blank" rel="noopener" data-i18n="official">Laws of Bangladesh (official)</a>
+      <a href="https://github.com/roy032/bd-legal-rag" target="_blank" rel="noopener" data-i18n="source">Source code</a>
     </div>
   </div>
-
-  <div class="foot">Informational only — not legal advice. Always check the official text on
-    the Laws of Bangladesh website before relying on anything here.</div>
-</div>
-<script>
-const $ = id => document.getElementById(id);
-const EXAMPLES = ["দণ্ডবিধির ধারা ৩০২ কী বলে?", "When can the police arrest without a warrant?",
-                  "শ্রমিকের দৈনিক কর্মঘণ্টা কত?", "What happens if a cheque bounces?"];
-$("examples").innerHTML = EXAMPLES.map(e => `<button class="ex" data-q="${e.replace(/"/g, "&quot;")}">${e}</button>`).join(" · ");
-$("examples").onclick = e => { if (e.target.dataset.q) { $("q").value = e.target.dataset.q; $("f").requestSubmit(); } };
-
-function badge(text, cls="") { const b = document.createElement("span"); b.className = "badge " + cls; b.textContent = text; $("badges").appendChild(b); }
-
-// Open a permalink directly: /a/<id> renders that stored answer.
-(async () => {
-  const m = location.pathname.match(/^\/a\/(\w+)/);
-  if (!m) return;
-  const r = await fetch("/a/" + m[1]);
-  if (!r.ok) return;
-  const d = await r.json();
-  $("q").value = d.question || "";
-  $("out").hidden = false;
-  render(d);
-})();
-
-$("f").onsubmit = async ev => {
-  ev.preventDefault();
-  const question = $("q").value.trim();
-  if (!question) return;
-  const useAgent = $("agent").checked, k = +$("k").value || 5;
-  $("out").hidden = false; $("answer").textContent = ""; $("badges").innerHTML = "";
-  $("sources").innerHTML = ""; $("srcwrap").hidden = true; $("go").disabled = true;
-  $("status").textContent = "searching…";
-  try {
-    // The agent makes several calls and has nothing to stream in between, so it
-    // uses the plain endpoint; single-shot answers stream token by token.
-    if (location.pathname.startsWith("/a/")) { /* permalink handled on load */ }
-    if (useAgent) {
-      const r = await fetch("/ask", {method:"POST", headers:{"content-type":"application/json"},
-        body: JSON.stringify({question, k, agent:true})});
-      render(await r.json());
-    } else {
-      await stream(question, k);
-    }
-  } catch (e) { $("status").textContent = "error: " + e.message; }
-  $("go").disabled = false;
-};
-
-async function stream(question, k) {
-  const r = await fetch("/ask/stream", {method:"POST", headers:{"content-type":"application/json"},
-    body: JSON.stringify({question, k})});
-  if (!r.ok) { render(await r.json()); return; }
-  const reader = r.body.getReader(), dec = new TextDecoder();
-  let buf = "";
-  for (;;) {
-    const {value, done} = await reader.read();
-    if (done) break;
-    buf += dec.decode(value, {stream:true});
-    const parts = buf.split("\n\n"); buf = parts.pop();
-    for (const part of parts) {
-      const ev = (part.match(/^event: (.*)$/m) || [])[1];
-      const data = JSON.parse((part.match(/^data: (.*)$/m) || [,"{}"])[1]);
-      if (ev === "status") $("status").textContent = data.stage === "repairing"
-        ? "fixing a failed check (" + (data.failures||[]).join(", ") + ")…" : data.stage + "…";
-      else if (ev === "sources") showSources(data.sources);
-      else if (ev === "token") { $("status").textContent = ""; $("answer").textContent += data.text; }
-      else if (ev === "final") render(data, true);
-      else if (ev === "error") $("status").textContent = "error: " + data.error;
-    }
-  }
-}
-
-// Everything below is data from the corpus or the model: escape before it
-// touches innerHTML (a section title or a tool name must never become markup).
-const esc = v => String(v ?? "").replace(/[&<>"']/g, c =>
-  ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
-const safeUrl = u => /^https?:\/\//i.test(u || "") ? esc(u) : "";
-
-function showSources(sources) {
-  if (!sources || !sources.length) return;
-  $("srcwrap").hidden = false;
-  $("sources").innerHTML = sources.map(s =>
-    `<li>[${esc(s.n)}] ${esc(s.citation)}${s.section_title ? " — " + esc(s.section_title) : ""}
-     ${safeUrl(s.url) ? `· <a href="${safeUrl(s.url)}" target="_blank" rel="noopener">official text</a>` : ""}
-     ${s.live_check === "current" ? `<span class="badge ok">✓ matches the site today</span>` :
-       s.live_check === "changed" ? `<span class="badge warn">⚠ changed on the site since indexing</span>` : ""}</li>`).join("");
-}
-
-let currentId = null;
-
-async function sendFeedback(rating) {
-  if (!currentId) return;
-  const comment = rating === "down" ? (prompt("What was wrong? (optional)") || "") : "";
-  await fetch("/feedback", {method:"POST", headers:{"content-type":"application/json"},
-    body: JSON.stringify({id: currentId, rating, comment})});
-  $("fbmsg").textContent = "thanks — logged";
-}
-$("fbup").onclick = () => sendFeedback("up");
-$("fbdown").onclick = () => sendFeedback("down");
-$("copy").onclick = async () => {
-  if (!currentId) return;
-  await navigator.clipboard.writeText(location.origin + "/a/" + currentId);
-  $("fbmsg").textContent = "link copied";
-};
-
-function render(d, streamed=false) {
-  $("status").textContent = "";
-  if (d.degraded && d.sources && d.sources.length) {
-    const excerpts = d.sources.map(s => `[${s.n}] ${s.citation}\n${s.text || ""}`).join("\n\n");
-    $("answer").textContent = "Retrieved provisions (no answering model configured):\n\n" + excerpts;
-  } else if (!streamed || d.repaired || d.refused) {
-    $("answer").textContent = d.answer || d.error || "";
-  }
-  showSources(d.sources);
-  $("badges").innerHTML = "";
-  if (d.refused) badge(d.abstained ? "refused — retrieval too weak" : "not found in the corpus", "warn");
-  if (d.repaired) badge("re-checked once", "warn");
-  (d.failures || []).forEach(f => badge(f, "bad"));
-  if (d.cached) badge("cached");
-  if (d.stop_reason) badge("agent: " + d.stop_reason + " · " + (d.trace||[]).length + " steps");
-  if (d.latency_s) badge(d.latency_s + "s" + (d.llm_calls ? " · " + d.llm_calls + " LLM calls" : ""));
-  if (d.confidence) {
-    const c = document.createElement("span");
-    c.className = "conf " + d.confidence.label;
-    c.textContent = "confidence: " + d.confidence.label;
-    c.title = (d.confidence.why || []).join("; ");
-    $("badges").appendChild(c);
-  }
-  if (d.trace && d.trace.length) {
-    $("tracewrap").hidden = false;
-    $("trace").innerHTML = d.trace.map(t =>
-      `<li>step ${esc(t.step)}: ${esc(t.tool || t.type)}${t.parallel > 1 ? " ×" + esc(t.parallel) : ""}` +
-      `${t.new_excerpts != null ? " → +" + esc(t.new_excerpts) + " excerpts" : ""}</li>`).join("");
-  } else { $("tracewrap").hidden = true; }
-  currentId = d.id || null;
-  $("fbwrap").hidden = !currentId;
-  $("fbmsg").textContent = "";
-}
-</script>
+</footer>
+<script src="/static/app.js"></script>
 </body>
 </html>

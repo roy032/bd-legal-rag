@@ -4,7 +4,7 @@ Every item from `IMPROVEMENTS.md`, and what happened to it. "Done" means
 implemented **and** covered by a test that runs offline in this repository.
 "Partial" and "Not done" say why, in one line, without dressing it up.
 
-Suite: **202 tests**, ruff clean, every `src/` module exercised.
+Suite: ruff clean, mypy clean, every `src/` module exercised.
 
 ## Tier 0 — defects in the first release
 
@@ -16,7 +16,7 @@ Suite: **202 tests**, ruff clean, every `src/` module exercised.
 | 4 | `sys.path` hack across packages | **Done** — installable package, `pyproject.toml`, bridge module deleted | `pyproject.toml` |
 | 5 | Streaming duplicated the answer logic | **Done** — one generator; `answer_question` consumes it | `rag/answer.py` |
 | 6 | Parent–child retrieval promised but missing | **Done** — `ParentIndex`, `--parent-context` | `rag/parent.py` |
-| 7 | `QdrantStore` never run | **Not done** — no Qdrant server in this environment; code unchanged and still unverified | — |
+| 7 | `QdrantStore` never run | **Done (embedded mode)** — top-k and scores match `NumpyStore` with and without filters; fixed id reuse on reopen and dropped callable filters. Not yet run against a Qdrant server with HNSW | `rag/store.py`, `tests/test_qdrant.py` |
 | 8 | Judge and answerer share a default model | **Done** — `eval_e2e` refuses a same-provider judge unless forced | `scripts/eval_e2e.py` |
 | 9 | `follow_refs` same-act only | **Done** — `act_refs` captured at parse time, followed across acts | `ingest/parse.py`, `rag/tools.py` |
 | 10 | `/metrics` missing HELP/TYPE | **Done** | `service/metrics.py` |
@@ -142,6 +142,37 @@ Suite: **202 tests**, ruff clean, every `src/` module exercised.
 | Property-based tests | **Not done** — Hypothesis is not installable in this environment |
 | Pinned lockfile | **Not done** — `pyproject.toml` has ranges; pin when you deploy |
 | Demo video, live deployment, published dataset | **Not done** — yours to do |
+
+## Ideas taken from tonmoyjoy/Bangladesh-Legal-Chatbot (2026-10-17)
+
+| Item | Status | Where |
+|---|---|---|
+| OCR for scanned PDFs, with Bangla (`ben+eng`), header/page-number stripping, section splitting | **Done** — tested on text-layer and scanned Bangla PDFs | `ingest/pdf.py`, `src/bdrag_tools/ingest_pdf.py` |
+| Setup checker (`test_setup.py` there) | **Done** — `bdrag doctor` | `rag/doctor.py` |
+| Hosted demo with a prebuilt index | **Done** — Hugging Face Space files + index push/pull | `deploy/hf-space/`, `src/bdrag_tools/sync_index.py` |
+| Example questions grouped by area of law | **Done** | `service/static/index.html` |
+| English topic → Bangla act title, wage/defamation/cyber synonyms | **Done** — not yet measured on the full index | `rag/lexicon.py` |
+
+## Upgrades after the free-model run (2026-10-17)
+
+| Item | Status | Where |
+|---|---|---|
+| PRs #1, #2 and #3 combined, conflicts resolved, PDF ingest and index sync moved into the package | **Done** | `bdrag pdf`, `bdrag sync` |
+| Scenario evaluation set: the 8 situations the free models missed, gold ids checked against the site | **Done** | `data/eval/eval_scenarios.jsonl` |
+| English ↔ Bangla: search the question in the other language too | **Done** — measure with `bdrag measure-upgrades` | `--translate`, `BDRAG_TRANSLATE` |
+| Everyday situations reach their governing sections (consumer EN→BN, defamation ss. 499/500, Labour Act wage sections, rent, dowry, cheque, arrest, bail, divorce...) | **Done** — measure with `bdrag eval --topics` on the scenario set; check numbers with `bdrag topics` | `--topics`, `BDRAG_TOPICS`, `rag/topics.py` |
+| Situation answers: short answer, the law, numbered steps, optional uncited practical tips | **Done** — answer-system/v6; tips may not state law (`law_in_tips` check) | `rag/prompts.py` |
+| No matching provision -> labelled general guidance + legal-aid note instead of NOT_FOUND | **Done** in the service; off in evaluation | `BDRAG_GENERAL_FALLBACK`, `--general-fallback` |
+| Reranker on a CPU: bf16 / int8, shortest-first batches, score cache | **Done** — 20 excerpts: fp32 10.9 s, int8 6.2 s, bf16 3.8 s on a 4-core cloud CPU | `--rerank-precision`, `rag/rerank.py` |
+| Faster local answers: Ollama keep-alive, warm-up at start, excerpt length setting | **Done** | `OLLAMA_KEEP_ALIVE`, `RAG_EXCERPT_CHARS` |
+| Pick a bigger free hosted model per question | **Done** | `BDRAG_MODELS`, `GET /models`, UI picker |
+| Amendment year on excerpts and source cards | **Done** | `rag/answer.py: amendment_label` |
+| Source cards with the excerpt text, copy answer | **Done** | `service/static/index.html` |
+| Judge calibration: the report compared humans with "a reason exists" (always faithful); now with the verdicts, plus spreadsheet grading and correctness | **Fixed** | `bdrag calibrate-judge --export/--import` |
+| Daily answer cap for a public demo | **Done** | `BDRAG_DAILY_LIMIT` |
+| Count scanned / missing acts before OCR | **Done** | `bdrag coverage` |
+| Thumbs-down answers become draft eval questions | **Done** | `bdrag feedback-to-eval` |
+| One command to measure all of it on the laptop | **Done** — not yet run | `RUN_UPGRADES.bat`, `bdrag measure-upgrades` |
 
 ## The four things only you can do
 

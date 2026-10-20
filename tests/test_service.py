@@ -219,8 +219,18 @@ class TestEndpoints(unittest.TestCase):
         self.assertTrue(final["sources"])
 
     def test_abstains_when_min_score_is_high(self):
-        body = self.client(min_score=0.99).post("/ask", json={"question": "হত্যার শাস্তি কী?"}).json()
+        body = self.client(min_score=0.99, general_fallback=False).post(
+            "/ask", json={"question": "হত্যার শাস্তি কী?"}).json()
         self.assertTrue(body["refused"] and body["abstained"])
+        self.assertFalse(body["general_guidance"])
+
+    def test_weak_retrieval_gets_labelled_general_guidance_by_default(self):
+        body = self.client(min_score=0.99).post("/ask", json={"question": "হত্যার শাস্তি কী?"}).json()
+        self.assertTrue(body["general_guidance"] and body["abstained"])
+        self.assertFalse(body["refused"])
+        self.assertTrue(body["answer"].startswith("সাধারণ নির্দেশনা"))
+        self.assertIn("১৬৪৩০", body["answer"])
+        self.assertEqual(body["sources"], [])
 
     def test_agent_mode_reports_its_trace(self):
         pipeline, _, stream = fake_components()
@@ -250,9 +260,6 @@ class TestEndpoints(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertIn("Bangladesh Law Assistant", r.text)
 
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 @unittest.skipUnless(HAVE_STARLETTE, "starlette not installed")
@@ -300,6 +307,34 @@ class TestServiceImprovements(unittest.TestCase):
         self.assertTrue(r.json()["degraded"])
         self.assertTrue(r.json()["sources"])
 
+    def test_daily_limit(self):
+        c = self.client(daily_limit=2)
+        q = {"question": "হত্যার শাস্তি কী?"}
+        self.assertEqual([c.post("/ask", json=q).status_code for _ in range(3)], [200, 200, 429])
+        self.assertEqual(c.post("/ask/stream", json=q).status_code, 429)
+
+    def test_model_picker(self):
+        from unittest import mock
+
+        big = lambda system, prompt: "বড় মডেলের উত্তর [1]।"          # noqa: E731
+        c = self.client(models=["ollama:gemma4:e4b", "groq:llama-3.3-70b-versatile"])
+        with mock.patch.dict("os.environ", {"GROQ_API_KEY": "k"}):
+            listed = c.get("/models").json()
+        self.assertEqual(listed["default"], "ollama:gemma4:e4b")
+        self.assertEqual([m["local"] for m in listed["models"]], [True, False])
+        with mock.patch.dict("os.environ", {}, clear=False):
+            import os
+            os.environ.pop("GROQ_API_KEY", None)
+            self.assertEqual(len(c.get("/models").json()["models"]), 1)   # no key, not offered
+
+        q = {"question": "হত্যার শাস্তি কী?"}
+        self.assertIn("মৃত্যুদণ্ড", c.post("/ask", json=q).json()["answer"])
+        with mock.patch("rag.llm.get_llm", return_value=big), \
+                mock.patch("rag.llm.get_stream_llm", return_value=lambda s, p: iter(["x"])):
+            r = c.post("/ask", json={**q, "model": "groq:llama-3.3-70b-versatile"})
+        self.assertIn("বড় মডেলের", r.json()["answer"])                  # not served from cache
+        self.assertEqual(c.post("/ask", json={**q, "model": "groq:anything"}).status_code, 400)
+
     def test_api_key_required_when_configured(self):
         c = self.client(api_keys={"secret": 60}, require_api_key=True)
         self.assertEqual(c.post("/ask", json={"question": "কী?"}).status_code, 401)
@@ -322,6 +357,34 @@ class TestServiceImprovements(unittest.TestCase):
         again = c.get(f"/a/{first['id']}").json()
         self.assertEqual(again["answer"], first["answer"])
         self.assertEqual(c.get("/a/deadbeef").status_code, 404)
+
+    def test_shared_link_opened_in_a_browser_gets_the_page(self):
+        c = self.client()
+        answer_id = c.post("/ask", json={"question": "হত্যার শাস্তি কী?"}).json()["id"]
+        page = c.get(f"/a/{answer_id}", headers={"accept": "text/html,application/xhtml+xml,*/*"})
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("text/html", page.headers["content-type"])
+        data = c.get(f"/a/{answer_id}", headers={"accept": "application/json"})
+        self.assertEqual(data.json()["id"], answer_id)
+
+    def test_ui_assets_are_served(self):
+        c = self.client()
+        for path in ("/static/app.js", "/static/app.css", "/static/favicon.svg",
+                     "/static/fonts/noto-sans-bengali-bengali-400-normal.woff2"):
+            self.assertEqual(c.get(path).status_code, 200, path)
+
+    def test_stream_rejects_an_overlong_question(self):
+        r = self.client().post("/ask/stream", json={"question": "x" * 501})
+        self.assertEqual(r.status_code, 400)
+
+    def test_framing_is_denied_unless_a_site_is_named(self):
+        closed = self.client().get("/")
+        self.assertEqual(closed.headers["x-frame-options"], "DENY")
+        self.assertIn("frame-ancestors 'none'", closed.headers["content-security-policy"])
+        space = self.client(frame_ancestors="https://huggingface.co").get("/")
+        self.assertNotIn("x-frame-options", space.headers)
+        self.assertIn("frame-ancestors 'self' https://huggingface.co",
+                      space.headers["content-security-policy"])
 
     def test_multi_hop_question_is_routed_to_the_agent(self):
         script = iter(['ACTION: {"tool": "search", "args": {"query": "হত্যা", "k": 1}}',
@@ -353,3 +416,16 @@ class TestServiceImprovements(unittest.TestCase):
     def test_answer_carries_confidence(self):
         body = self.client().post("/ask", json={"question": "হত্যার শাস্তি কী?"}).json()
         self.assertIn(body["confidence"]["label"], ("high", "medium", "low", "none"))
+
+
+class TestAgentRouting(unittest.TestCase):
+    def test_situations_and_comparisons_go_to_the_agent(self):
+        from service.app import wants_agent
+        self.assertTrue(wants_agent("My employer fired me without notice. What can I do?"))
+        self.assertTrue(wants_agent("আমার স্বামী আমাকে মারধর করে, আমি কী করব?"))
+        self.assertTrue(wants_agent("difference between theft and robbery"))
+        self.assertFalse(wants_agent("What does section 302 of the Penal Code say?"))
+
+
+if __name__ == "__main__":
+    unittest.main()

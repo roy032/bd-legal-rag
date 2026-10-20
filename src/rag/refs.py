@@ -95,6 +95,10 @@ class ActResolver:
         years = re.findall(r"(1[6-9]\d\d|20\d\d)", bn_to_ascii_digits(self.titles.get(act_id, "")))
         return int(years[-1]) if years else None
 
+    def find_act(self, phrase: str) -> list[int]:
+        """The principal act whose title contains `phrase` (already normalised), or []."""
+        return self._principal(phrase)
+
     def _principal(self, phrase: str) -> list[int]:
         """Acts whose title contains `phrase`: in force first, amending acts last, shortest first."""
         found = [(aid, t) for aid, t in self.titles.items() if phrase in _norm(t)]
@@ -130,6 +134,10 @@ def apply_reference(hits: list[Hit], ref: Reference, resolver: ActResolver) -> l
         for aid in ref.act_ids:
             for num in ref.numbers:
                 exact += resolver.lookup(aid, num)
+    # Mark the looked-up section so the answer prompt can label it: the model
+    # should cite the section the question names, not a neighbouring definition.
+    exact = [Hit(h.chunk_id, h.score, h.text, h.body, {**h.metadata, "requested": True})
+             for h in exact]
     seen = {h.chunk_id for h in exact}
     rest = [h for h in hits if h.chunk_id not in seen]
 

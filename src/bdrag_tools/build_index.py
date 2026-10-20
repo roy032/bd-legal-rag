@@ -1,0 +1,160 @@
+#!/usr/bin/env python
+"""Phase 2a: chunks.jsonl -> vector index.
+
+  python scripts/build_index.py                          # bge-m3 + numpy index
+  python scripts/build_index.py --embedder hashing       # offline, no model download
+  python scripts/build_index.py --backend qdrant         # needs a running Qdrant
+  python scripts/build_index.py --bm25 --batch-size 64 --fp16   # on a GPU (Kaggle: kaggle/)
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import time
+from pathlib import Path
+
+import numpy as np
+
+from rag import jsonio
+from rag.embed import get_embedder
+from rag.lexical import BM25Index
+from rag.store import NumpyStore, QdrantStore
+
+
+def _key(text: str) -> str:
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()
+
+
+def embed_with_reuse(chunks: list[dict], embedder, out: Path, checkpoint_every: int = 2000) -> np.ndarray:
+    """Embed only what has not been embedded before.
+
+    Vectors are reused, by hash of the embedded text, from (a) the index already
+    in `out` if it was built with the same embedder, and (b) a checkpoint left
+    by an interrupted run. So re-running after `ingest.py --update`, or after a
+    crash three hours into a CPU run, only pays for the new chunks.
+    """
+    known: dict[str, np.ndarray] = {}
+    info = out / "index.json"
+    if info.exists() and json.loads(info.read_text(encoding="utf-8")).get("embedder") == embedder.name:
+        try:
+            old = NumpyStore.load(out)
+            known.update({_key(r["text"]): v for r, v in zip(old.records, old.vectors, strict=True)})
+        except Exception as e:                      # a broken old index is just not reused
+            print(f"  (previous index not reusable: {e})")
+    ckpt_v, ckpt_k = out / "embed_checkpoint.npy", out / "embed_checkpoint.json"
+    if ckpt_v.exists() and ckpt_k.exists():
+        meta = json.loads(ckpt_k.read_text(encoding="utf-8"))
+        if meta.get("embedder") == embedder.name:
+            known.update(zip(meta["keys"], np.load(ckpt_v).astype(np.float32), strict=True))
+
+    keys = [_key(c["text"]) for c in chunks]
+    todo = sorted({k: i for i, k in enumerate(keys) if k not in known}.values())
+    print(f"  reusing {len(chunks) - len(todo)} vectors, embedding {len(todo)} new chunk(s)")
+    out.mkdir(parents=True, exist_ok=True)
+    fresh_keys: list[str] = []
+    fresh_vecs: list[np.ndarray] = []
+    for start in range(0, len(todo), max(checkpoint_every, 1)):
+        batch = todo[start:start + checkpoint_every]
+        vecs = embedder.encode_passages([chunks[i]["text"] for i in batch])
+        for i, v in zip(batch, vecs, strict=True):
+            known[keys[i]] = v
+            fresh_keys.append(keys[i])
+            fresh_vecs.append(v)
+        np.save(ckpt_v, np.asarray(fresh_vecs, dtype=np.float16))
+        ckpt_k.write_text(json.dumps({"embedder": embedder.name, "keys": fresh_keys}), encoding="utf-8")
+        print(f"  {min(start + checkpoint_every, len(todo))}/{len(todo)} embedded", flush=True)
+    vectors = np.asarray([known[k] for k in keys], dtype=np.float32)
+    for p in (ckpt_v, ckpt_k):
+        if p.exists():
+            p.unlink()
+    return vectors
+
+
+PDF_CHUNKS = Path("data/processed/pdf_chunks.jsonl")
+
+
+def load_chunks(path: Path | list[Path]) -> list[dict]:
+    """One or more chunk files; a later file's chunk replaces an earlier one with the same id."""
+    paths = path if isinstance(path, list) else [path]
+    merged: dict[str, dict] = {}
+    for p in paths:
+        for c in jsonio.read_jsonl(p):
+            merged[c["chunk_id"]] = c
+    return list(merged.values())
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--chunks", nargs="+", default=None,
+                    help="chunk file(s); default data/processed/chunks.jsonl, plus "
+                         "pdf_chunks.jsonl from `bdrag pdf` when it exists")
+    ap.add_argument("--out", default="data/index")
+    ap.add_argument("--embedder", choices=["st", "hashing"], default="st")
+    ap.add_argument("--model", default="BAAI/bge-m3")
+    ap.add_argument("--backend", choices=["numpy", "qdrant"], default="numpy")
+    ap.add_argument("--collection", default="bdlaws")
+    ap.add_argument("--qdrant-url", default="http://localhost:6333")
+    ap.add_argument("--qdrant-path", help="embedded Qdrant on disk instead of a server")
+    ap.add_argument("--batch-size", type=int, default=8, help="8 on a CPU; 64+ on a GPU")
+    ap.add_argument("--fp16", action="store_true", help="half-precision embedding (GPU only)")
+    ap.add_argument("--bm25", action="store_true", help="also build a BM25 index (needed for hybrid)")
+    ap.add_argument("--bm25-stem", action="store_true", help="strip common Bangla suffixes")
+    ap.add_argument("--bm25-only", action="store_true", help="skip embeddings entirely")
+    ap.add_argument("--checkpoint-every", type=int, default=2000,
+                    help="save embedding progress every N new chunks (a crash resumes from there)")
+    ap.add_argument("--quantize", action="store_true",
+                    help="store int8 vectors (4x smaller, rescored exactly — measure the recall cost)")
+    args = ap.parse_args()
+
+    paths = [Path(p) for p in args.chunks] if args.chunks else [Path("data/processed/chunks.jsonl")]
+    if args.chunks is None and PDF_CHUNKS.exists():
+        paths.append(PDF_CHUNKS)
+    chunks = load_chunks(paths)
+    print(f"{len(chunks)} chunks from {', '.join(map(str, paths))}")
+
+    if args.bm25 or args.bm25_only:
+        t0 = time.perf_counter()
+        bm25 = BM25Index(stem=args.bm25_stem)
+        bm25.add(chunks)
+        # The dense index writes the same records; keep one copy on disk.
+        bm25.save(args.out, write_records=args.bm25_only or args.backend != "numpy")
+        print(f"BM25: {len(bm25)} docs, {len(bm25.postings)} terms, "
+              f"avg length {bm25.avgdl:.0f} tokens, stem={args.bm25_stem} "
+              f"({time.perf_counter() - t0:.1f}s) -> {args.out}")
+        if args.bm25_only:
+            return
+
+    kw = {"batch_size": args.batch_size, "half": args.fp16} if args.embedder == "st" else {}
+    embedder = get_embedder(args.embedder, model=args.model, **kw)
+    print(f"embedder: {embedder.name} (dim {embedder.dim})")
+
+    t0 = time.perf_counter()
+    vectors = embed_with_reuse(chunks, embedder, Path(args.out), args.checkpoint_every)
+    took = time.perf_counter() - t0
+    print(f"embedded in {took:.1f}s")
+
+    store = (NumpyStore(embedder.dim, embedder.name, quantize=args.quantize)
+             if args.backend == "numpy"
+             else QdrantStore(embedder.dim, args.collection, url=args.qdrant_url,
+                              path=args.qdrant_path, embedder_name=embedder.name, recreate=True))
+    store.add(vectors, chunks)
+    if isinstance(store, NumpyStore):
+        store.save(args.out)
+        print(f"saved {len(store)} vectors to {args.out}")
+    else:
+        # index.json tells every entry point (and the service) to search Qdrant;
+        # the records file keeps exact lookup and the BM25 index working offline.
+        out = Path(args.out)
+        out.mkdir(parents=True, exist_ok=True)
+        jsonio.write_jsonl(out / "records.jsonl", chunks)
+        (out / "index.json").write_text(json.dumps({
+            "dim": embedder.dim, "embedder": embedder.name, "count": len(store),
+            "backend": "qdrant", "collection": args.collection,
+            "url": None if args.qdrant_path else args.qdrant_url, "path": args.qdrant_path,
+        }, indent=2), encoding="utf-8")
+        print(f"upserted {len(store)} points into Qdrant collection '{args.collection}'")
+
+
+if __name__ == "__main__":
+    main()

@@ -71,6 +71,19 @@ SECURITY_HEADERS = {
 }
 
 
+def security_headers(frame_ancestors: str = "") -> dict[str, str]:
+    """The headers every response carries. A Hugging Face Space shows the app inside
+    an iframe on huggingface.co, so a deployment can name the sites allowed to frame
+    it (BDRAG_FRAME_ANCESTORS="https://huggingface.co"); by default nobody may."""
+    if not frame_ancestors.strip():
+        return {**SECURITY_HEADERS,
+                "content-security-policy": SECURITY_HEADERS["content-security-policy"]
+                + "; frame-ancestors 'none'"}
+    headers = {k: v for k, v in SECURITY_HEADERS.items() if k != "x-frame-options"}
+    headers["content-security-policy"] += f"; frame-ancestors 'self' {frame_ancestors.strip()}"
+    return headers
+
+
 def _env_bool(name: str, default: bool = False) -> bool:
     raw = os.environ.get(name, "").strip()
     return raw.lower() in ("1", "true", "yes", "on") if raw else default
@@ -103,7 +116,7 @@ class ServiceConfig:
     # dense bge-m3 beat both fusion settings there, and on the test set BM25 fusion cost recall.
     retrieval: RetrievalConfig = field(default_factory=lambda: RetrievalConfig(
         mode="dense", expand_refs=True, synonyms=True, transliterate=True, route=False,
-        boost_in_force=True, resolve_refs=True, max_parts_per_section=2))
+        boost_in_force=True, resolve_refs=True, topics=True, max_parts_per_section=2))
     k: int = 5
     max_k: int = 20
     min_score: float | None = None
@@ -112,13 +125,22 @@ class ServiceConfig:
     max_steps: int = 5
     provider: str | None = None
     llm_model: str = ""
+    # Answering models a visitor may pick in the UI, "provider:model", default first:
+    # BDRAG_MODELS="ollama:gemma4:e4b,groq:llama-3.3-70b-versatile". Empty = RAG_LLM only.
+    models: list[str] = field(default_factory=list)
     cache_ttl_s: float = 1800
     cache_size: int = 512
     rate_per_min: float = 20
+    # Answers per UTC day across all visitors; 0 = no cap. A public demo on a free
+    # hosted model key should set this below the provider's daily quota.
+    daily_limit: int = 0
     burst: int = 5
     api_keys: dict[str, float] = field(default_factory=dict)   # key -> requests/min
     require_api_key: bool = False
     entailer: str = "none"           # none | lexical | nli
+    # When the indexed laws cannot answer, reply with labelled general guidance and
+    # the legal-aid note instead of a bare "not found" (rag.answer.general_guidance).
+    general_fallback: bool = True
     # Empty = don't write. Only from_env() turns logging on, so a ServiceConfig
     # built in a test never appends to the real data/queries.jsonl.
     feedback_path: str = ""
@@ -128,18 +150,26 @@ class ServiceConfig:
     verify_live: bool = False        # re-check cited sections against bdlaws (rag/verify.py)
     preload: bool = False            # load index and models at startup (from_env turns it on)
     cache_dir: str = "data/raw"        # honour X-Forwarded-For (only behind your own proxy)
+    frame_ancestors: str = ""        # sites allowed to embed the UI in an iframe; empty = none
 
     @classmethod
     def from_env(cls) -> ServiceConfig:
         retrieval = RetrievalConfig(
             mode=_env_str("BDRAG_MODE", "dense"),
             rerank=_env_str("BDRAG_RERANK", "none"),
+            rerank_model=_env_str("BDRAG_RERANK_MODEL", "BAAI/bge-reranker-v2-m3"),
+            rerank_top=_env_int("BDRAG_RERANK_TOP", 20),
+            rerank_precision=_env_str("BDRAG_RERANK_PRECISION", "auto"),
+            rewrite=_env_str("BDRAG_REWRITE", "colloquial"),
+            translate=_env_bool("BDRAG_TRANSLATE", True),
             expand_refs=_env_bool("BDRAG_EXPAND_REFS", True),
             synonyms=_env_bool("BDRAG_SYNONYMS", True),
             transliterate=_env_bool("BDRAG_TRANSLITERATE", True),
             route=_env_bool("BDRAG_ROUTE", False),
             boost_in_force=_env_bool("BDRAG_BOOST_IN_FORCE", True),
             resolve_refs=_env_bool("BDRAG_RESOLVE_REFS", True),
+            topics=_env_bool("BDRAG_TOPICS", True),
+            topic_slots=_env_int("BDRAG_TOPIC_SLOTS", 3),
             parent_context=_env_bool("BDRAG_PARENT_CONTEXT", False),
             mmr_lambda=_env_float("BDRAG_MMR"),
             max_parts_per_section=_env_int("BDRAG_MAX_PARTS", 2),
@@ -163,11 +193,14 @@ class ServiceConfig:
             max_steps=_env_int("BDRAG_MAX_STEPS", 5),
             provider=os.environ.get("RAG_LLM", "").strip() or None,
             llm_model=_env_str("RAG_MODEL", ""),
+            models=[m.strip() for m in _env_str("BDRAG_MODELS", "").split(",") if m.strip()],
             cache_ttl_s=_env_float("BDRAG_CACHE_TTL", 1800.0) or 0.0,
             rate_per_min=_env_float("BDRAG_RATE_PER_MIN", 20.0) or 20.0,
+            daily_limit=_env_int("BDRAG_DAILY_LIMIT", 0),
             api_keys=keys,
             require_api_key=_env_bool("BDRAG_REQUIRE_API_KEY", False),
             entailer=_env_str("BDRAG_ENTAILER", "none"),
+            general_fallback=_env_bool("BDRAG_GENERAL_FALLBACK", True),
             feedback_path=_env_str("BDRAG_FEEDBACK", "data/feedback.jsonl"),
             analytics_path=_env_str("BDRAG_ANALYTICS", "data/queries.jsonl"),
             cors_origins=[o.strip() for o in _env_str("BDRAG_CORS", "*").split(",") if o.strip()],
@@ -175,15 +208,17 @@ class ServiceConfig:
             verify_live=_env_bool("BDRAG_VERIFY_LIVE", False),
             preload=_env_bool("BDRAG_PRELOAD", True),
             cache_dir=_env_str("BDRAG_CACHE", "data/raw"),
+            frame_ancestors=_env_str("BDRAG_FRAME_ANCESTORS", ""),
         )
 
 
 class RequestContext(BaseHTTPMiddleware):
     """Request id, timing, metrics, security headers, structured logs, JSON 500."""
 
-    def __init__(self, app, metrics: Metrics) -> None:
+    def __init__(self, app, metrics: Metrics, headers: dict[str, str] | None = None) -> None:
         super().__init__(app)
         self.metrics = metrics
+        self.headers = headers or security_headers()
 
     async def dispatch(self, request: Request, call_next):
         rid = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
@@ -197,11 +232,11 @@ class RequestContext(BaseHTTPMiddleware):
                                       "event": "unhandled_error"}))
             self.metrics.inc("errors_total", path=request.url.path)
             return JSONResponse({"error": "internal error", "request_id": rid}, status_code=500,
-                                headers=SECURITY_HEADERS)
+                                headers=self.headers)
         took = time.perf_counter() - start
         self.metrics.inc("requests_total", path=request.url.path, status=response.status_code)
         self.metrics.observe("request", took, path=request.url.path)
-        response.headers.update({"x-request-id": rid, **SECURITY_HEADERS})
+        response.headers.update({"x-request-id": rid, **self.headers})
         log.info(json.dumps({"request_id": rid, "path": request.url.path,
                              "status": response.status_code, "ms": round(took * 1000)}))
         return response
@@ -233,9 +268,44 @@ MULTI_HOP_HINTS = ("difference", "compare", "পার্থক্য", "তু�
 
 
 def wants_agent(question: str) -> bool:
-    """Cheap router: only pay for multi-step retrieval when the question needs it."""
+    """Cheap router: only pay for multi-step retrieval when the question needs it.
+
+    A personal situation ("my landlord locked me out, what can I do?") usually needs
+    several provisions at once (the right, the penalty, where to complain), which
+    is what the agent's multiple searches are for."""
+    from rag.scope import classify_request
+
     low = question.lower()
-    return any(h in low for h in MULTI_HOP_HINTS) or low.count("?") > 1
+    return (any(h in low for h in MULTI_HOP_HINTS) or low.count("?") > 1
+            or classify_request(question)["advice"])
+
+
+LOCAL_PROVIDERS = ("ollama", "compat", "echo")
+
+
+def split_model(spec: str) -> tuple[str, str]:
+    """"groq:openai/gpt-oss-120b" -> ("groq", "openai/gpt-oss-120b"); the model may hold ':'."""
+    provider, _, model = spec.partition(":")
+    return provider.strip().lower(), model.strip()
+
+
+def model_options(cfg: ServiceConfig) -> list[dict]:
+    """What the UI's model picker offers. Hosted entries without a key are left out."""
+    from rag.llm import COMPAT_HOSTS, compat_settings
+
+    specs = cfg.models or [f"{cfg.provider or 'echo'}:{cfg.llm_model}"]
+    out = []
+    for spec in specs:
+        provider, model = split_model(spec)
+        if provider in COMPAT_HOSTS and provider != "compat":
+            try:
+                compat_settings(provider, model or None)
+            except ValueError:                   # no key for this host: don't offer it
+                continue
+        local = provider in LOCAL_PROVIDERS
+        out.append({"id": spec, "provider": provider, "model": model or None, "local": local,
+                    "label": f"{model or provider} ({'on this machine' if local else provider})"})
+    return out
 
 
 def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
@@ -271,8 +341,9 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
 
         embedder = embedder_for(cfg.retrieval.mode, cfg.embedder, cfg.model, cfg.index)
         state["records"] = state["records"] or load_records(cfg.index, cfg.chunks)
-        state["llm"] = state["llm"] or get_llm(cfg.provider)
-        state["stream_llm"] = state["stream_llm"] or get_stream_llm(cfg.provider)
+        provider, model = split_model(cfg.models[0]) if cfg.models else (cfg.provider, "")
+        state["llm"] = state["llm"] or get_llm(provider, model or None)
+        state["stream_llm"] = state["stream_llm"] or get_stream_llm(provider, model or None)
         state["pipeline"] = build_pipeline(cfg.retrieval, cfg.index, embedder,
                                            llm=state["llm"], records=state["records"])
         state["fingerprint"] = index_fingerprint(cfg.index)
@@ -287,7 +358,8 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
                 log.warning("entailer '%s' unavailable; running without claim checking",
                             cfg.entailer)
                 state["entailer"] = None
-        return GuardConfig(min_score=cfg.min_score, entailer=state["entailer"])
+        return GuardConfig(min_score=cfg.min_score, entailer=state["entailer"],
+                           general_fallback=cfg.general_fallback)
 
     def agent() -> LegalAgent:
         if state["agent"] is None:
@@ -306,6 +378,28 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
             "ts": time.time(), "id": answer_id, "client": client, "question": ans.question,
             "agent": use_agent, "refused": ans.refused, "failures": ans.failures,
             "sources": [s["chunk_id"] for s in ans.sources], "latency_s": round(ans.latency_s, 2)})
+
+    def pick_model(body: dict):
+        """(llm, stream_llm, id) for the model the request asks for; None = unknown model."""
+        wanted = (body.get("model") or "").strip()
+        default = cfg.models[0] if cfg.models else ""
+        if not wanted or wanted == default:
+            return state["llm"], state["stream_llm"], default
+        if wanted not in cfg.models:
+            return None
+        built = state.setdefault("models", {})
+        if wanted not in built:
+            from rag.llm import get_llm, get_stream_llm
+
+            provider, model = split_model(wanted)
+            built[wanted] = (get_llm(provider, model or None),
+                             get_stream_llm(provider, model or None))
+        return (*built[wanted], wanted)
+
+    async def models(request: Request):
+        options = model_options(cfg)
+        return JSONResponse({"models": options,
+                             "default": options[0]["id"] if options else None})
 
     async def payload(request: Request) -> dict:
         try:
@@ -345,6 +439,23 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
             return denied, None
         blocked = limited(client)
         return blocked, client
+
+    daily: dict = {"day": "", "n": 0}
+    daily_lock = threading.Lock()
+
+    def over_daily_limit() -> JSONResponse | None:
+        if not cfg.daily_limit:
+            return None
+        today = time.strftime("%Y-%m-%d", time.gmtime())
+        with daily_lock:
+            if daily["day"] != today:
+                daily.update(day=today, n=0)
+            if daily["n"] >= cfg.daily_limit:
+                metrics.inc("daily_limit_total")
+                return JSONResponse({"error": "this demo has answered its questions for today; "
+                                              "please try again tomorrow"}, status_code=429)
+            daily["n"] += 1
+        return None
 
     async def degraded_retrieval(question: str, k: int):
         hits = await run_in_threadpool(lambda: state["pipeline"].search(question, k=k))
@@ -435,6 +546,8 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         return {
             "id": answer_id, "question": ans.question, "answer": ans.text,
             "refused": ans.refused, "abstained": ans.abstained, "repaired": ans.repaired,
+            # Not grounded in the indexed laws: label it and replace any streamed draft.
+            "general_guidance": ans.general,
             "failures": ans.failures, "sources": ans.sources,
             "confidence": ans.checks.get("confidence"),
             "llm_calls": ans.llm_calls, "cached": cached,
@@ -471,6 +584,8 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         blocked, client = gate(request)
         if blocked is not None:
             return blocked
+        if (capped := over_daily_limit()) is not None:
+            return capped
         body = await payload(request)
         question = (body.get("question") or "").strip()
         if not question:
@@ -480,11 +595,16 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         await run_in_threadpool(build)
         trace: Trace = request.state.trace
         k = clamp_k(body.get("k"))
-        if getattr(state["llm"], "offline_stub", False):
+        if (picked := pick_model(body)) is None:
+            return JSONResponse({"error": "unknown model; GET /models lists the choices"},
+                                status_code=400)
+        llm, _, model_id = picked
+        if getattr(llm, "offline_stub", False):
             return await degraded_retrieval(question, k)
         use_agent = cfg.agent_enabled and (bool(body.get("agent")) or
                                            (cfg.agent_auto and wants_agent(question)))
         key = cache_key(question, k=k, agent=use_agent, language=body.get("language"),
+                        model=model_id,
                         fingerprint=state["fingerprint"], retrieval=cfg.retrieval.to_dict(),
                         min_score=cfg.min_score)
         if (hit := answers.get(key)) is not None:
@@ -493,8 +613,12 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
 
         def work():
             if use_agent:
-                return agent().run(question)
-            return answer_question(question, state["pipeline"], state["llm"], k=k,
+                if llm is state["llm"]:
+                    return agent().run(question)
+                return LegalAgent(state["pipeline"], state["records"] or [], llm,
+                                  AgentConfig(max_steps=cfg.max_steps, per_call_k=cfg.k,
+                                              guard=guard(), seed=True)).run(question)
+            return answer_question(question, state["pipeline"], llm, k=k,
                                    guard=guard(), language=body.get("language"))
 
         t0 = time.perf_counter()
@@ -538,13 +662,21 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         blocked, client = gate(request)
         if blocked is not None:
             return blocked
+        if (capped := over_daily_limit()) is not None:
+            return capped
         body = await payload(request)
         question = (body.get("question") or "").strip()
         if not question:
             return JSONResponse({"error": "question is required"}, status_code=400)
+        if len(question) > 500:
+            return JSONResponse({"error": "question too long (max 500 characters)"}, status_code=400)
         await run_in_threadpool(build)
         k = clamp_k(body.get("k"))
-        if getattr(state["stream_llm"], "offline_stub", False):
+        if (picked := pick_model(body)) is None:
+            return JSONResponse({"error": "unknown model; GET /models lists the choices"},
+                                status_code=400)
+        llm, stream_llm, _ = picked
+        if getattr(stream_llm, "offline_stub", False):
             return await degraded_retrieval(question, k)
 
         def sse(event: str, data: dict) -> str:
@@ -553,8 +685,8 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         def events():
             try:
                 for item in answer_question_stream(
-                        question, state["pipeline"], state["stream_llm"], k=k, guard=guard(),
-                        repair_llm=state["llm"], language=body.get("language")):
+                        question, state["pipeline"], stream_llm, k=k, guard=guard(),
+                        repair_llm=llm, language=body.get("language")):
                     kind = item["type"]
                     if kind == "final":
                         ans = item["answer"]
@@ -609,10 +741,19 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         return JSONResponse({"ok": True})
 
     async def permalink(request: Request):
+        # A shared link opened in a browser gets the page, which then fetches the
+        # stored answer as JSON from this same URL.
+        # The page asks with ?format=json: a browser may otherwise answer its fetch
+        # from the cached page, whatever Accept header the fetch sends.
+        accept = request.headers.get("accept", "")
+        vary = {"vary": "accept"}
+        if (request.query_params.get("format") != "json"
+                and "text/html" in accept and "application/json" not in accept):
+            return FileResponse(STATIC / "index.html", headers=vary)
         stored = recent.get(request.path_params["answer_id"])
         if not stored:
-            return JSONResponse({"error": "not found or expired"}, status_code=404)
-        return JSONResponse(stored)
+            return JSONResponse({"error": "not found or expired"}, status_code=404, headers=vary)
+        return JSONResponse(stored, headers=vary)
 
     async def index_page(request: Request):
         return FileResponse(STATIC / "index.html")
@@ -621,6 +762,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         Route("/", index_page),
         Route("/health", health),
         Route("/stats", stats),
+        Route("/models", models),
         Route("/metrics", metrics_endpoint),
         Route("/search", search, methods=["POST"]),
         Route("/ask", ask, methods=["POST"]),
@@ -632,7 +774,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         routes.append(Mount("/static", StaticFiles(directory=str(STATIC)), name="static"))
 
     middleware = [
-        Middleware(RequestContext, metrics=metrics),
+        Middleware(RequestContext, metrics=metrics, headers=security_headers(cfg.frame_ancestors)),
         Middleware(CORSMiddleware, allow_origins=cfg.cors_origins, allow_methods=["*"],
                    allow_headers=["*"]),
     ]
@@ -641,6 +783,10 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         question is not the one that pays for loading them."""
         try:
             build()
+            from rag.llm import warm_up
+
+            if warm_up(cfg.provider):
+                log.info("answering model loaded")
             log.info("index and models loaded")
         except Exception:
             log.exception("preload failed; the first request will retry")

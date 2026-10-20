@@ -28,8 +28,9 @@ def _header(act: Act, sec: Section) -> str:
     parts = [act.title]
     if sec.chapter:
         parts.append(sec.chapter)
-    if getattr(sec, "heading", None):
-        parts.append(sec.heading)
+    heading = getattr(sec, "heading", None)
+    if heading:
+        parts.append(heading)
     parts.append(f"{label} {sec.number}: {sec.title}".strip())
     return " > ".join(parts)
 
@@ -160,14 +161,15 @@ def act_overview_chunk(act: Act, max_chars: int = 3000) -> Chunk:
         if getattr(s, "inherited_number", False):
             continue
         lines.append(f"{s.number}. {s.title}" if s.number else s.title)
-    body, used = [], 0
+    kept: list[str] = []
+    used = 0
     for ln in lines:
         if used + len(ln) + 1 > max_chars:
-            body.append("…")
+            kept.append("…")
             break
-        body.append(ln)
+        kept.append(ln)
         used += len(ln) + 1
-    body = "\n".join(body).strip()
+    body = "\n".join(kept).strip()
     return Chunk(
         chunk_id=f"{act.act_id}-overview",
         text=body,

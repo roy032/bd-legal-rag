@@ -30,7 +30,13 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
-from .answer import REFUSAL_MARK, Answer, check_citations, normalize_answer
+from .answer import (
+    REFUSAL_MARK,
+    Answer,
+    check_citations,
+    normalize_answer,
+    with_general_guidance,
+)
 from .guardrails import GuardConfig, repair_instruction, run_checks
 from .refs import ActResolver
 from .tools import EvidenceBook, SectionLookup, ToolBox
@@ -68,6 +74,9 @@ Rules:
 - If an excerpt says a term is defined elsewhere, use follow_refs on that excerpt.
 - Quote the words of a provision exactly as they appear, or paraphrase without quotation marks.
 - Answer in the same language as the question.
+- If the question describes a situation, find every provision it needs (the offence or
+  right, the penalty or remedy, and where to complain or apply), then apply them to the
+  facts given and say what the person can do, citing each point.
 - If, after searching, the corpus does not answer the question, reply:
   ANSWER: NOT_FOUND: <what is missing>
 - You have at most {max_steps} actions. Spend them; do not stall."""
@@ -229,9 +238,11 @@ class LegalAgent:
             # Out of steps (or stopped early): make one final attempt to answer
             # from whatever was gathered, rather than returning nothing.
             if not hits:
-                return Answer(question, f"{REFUSAL_MARK}: no excerpts were retrieved.", [],
-                              refused=True, latency_s=time.perf_counter() - t0,
-                              llm_calls=calls, checks={"trace": trace, "stop_reason": stop_reason})
+                return with_general_guidance(Answer(
+                    question, f"{REFUSAL_MARK}: no excerpts were retrieved.", [],
+                    refused=True, latency_s=time.perf_counter() - t0,
+                    llm_calls=calls, checks={"trace": trace, "stop_reason": stop_reason}),
+                    self.llm, cfg.guard)
             final = (self.llm(system, f"Question: {question}\n\nExcerpts:\n{book.render()}\n\n"
                                       f"You are out of actions. If these excerpts contain the "
                                       f"provisions the question asks about, answer from them now, "
@@ -260,11 +271,11 @@ class LegalAgent:
                 final, checks, refused = retry, retry_checks, retry_refused
 
         cited, invalid = check_citations(final, len(hits))
-        return Answer(
+        return with_general_guidance(Answer(
             question=question, text=final, hits=hits, cited=cited, invalid_citations=invalid,
             refused=refused, latency_s=time.perf_counter() - t0, repaired=repaired,
             llm_calls=calls,
             checks={**checks, "trace": trace, "stop_reason": stop_reason,
                     "steps": len([t for t in trace if t["type"] == "tool"]),
                     "tool_calls": tools.calls, "evidence": len(book)},
-        )
+        ), self.llm, cfg.guard)

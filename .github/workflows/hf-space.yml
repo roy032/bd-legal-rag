@@ -1,0 +1,38 @@
+name: Deploy to Hugging Face Space
+
+# Publishes deploy/hf-space/ to your free Space on every push to main, so the
+# public demo always serves main. Off until you set, in the repo's
+# Settings > Secrets and variables > Actions:
+#   variable HF_SPACE = <you>/<space-name>   (create the Space first, Docker SDK)
+#   secret   HF_TOKEN = a token with write access to that Space
+on:
+  push:
+    branches: [main]
+    paths: ["deploy/hf-space/**", "src/**", "pyproject.toml"]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    if: ${{ vars.HF_SPACE != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install "huggingface_hub>=0.24"
+      - name: Upload the Space files
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE: ${{ vars.HF_SPACE }}
+        # The Dockerfile clones the repo at build time, so a new commit on main
+        # needs a rebuild even when deploy/hf-space/ did not change.
+        run: |
+          python - <<'PY'
+          import os
+          from huggingface_hub import HfApi
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          space = os.environ["HF_SPACE"]
+          api.upload_folder(repo_id=space, repo_type="space", folder_path="deploy/hf-space",
+                            commit_message=f"Deploy {os.environ['GITHUB_SHA'][:7]}")
+          api.restart_space(space, factory_reboot=True)
+          PY

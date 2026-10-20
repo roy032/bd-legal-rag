@@ -4,14 +4,18 @@ What is still open in this project. What has already been fixed is recorded in [
 
 ## Limitations
 
-- **`QdrantStore` is unverified.** I have not run it against a live Qdrant server. The default `NumpyStore` is what the tests and the reported numbers use.
-- **Scripts still adjust `sys.path`.** The library is an installable package, but the scripts in `scripts/` still insert `src/` into the path so they run without installing. Moving them to console entry points is the clean fix.
-- **Evaluation set size.** 86 held-out questions is enough to compare configurations, not enough to claim tight confidence intervals.
-- **Judge model.** Answer correctness is judged by an LLM. The judge is required to differ from the answering model, but it has not been calibrated against many human labels.
-- **Corpus scope.** Coverage depends on the acts I ingested, so questions about other acts will not be answered well.
+- **Qdrant has only run in embedded mode.** `tests/test_qdrant.py` checks top-k and scores against `NumpyStore` with Qdrant's local mode, which searches exactly. A Qdrant server uses an HNSW index, so its recall against the exact store still needs measuring on the real index.
+- **New retrieval options are not yet measured on the full corpus.** `--translate`, `--rerank-top 20` with `--rerank-precision`, `--rewrite colloquial`, the `TOPIC_ACTS` glossary and the `[REQUESTED SECTION]` prompt are tested offline only. `RUN_UPGRADES.bat` (`bdrag measure-upgrades`) measures them on the laptop's index and writes `results/UPGRADES.md`.
+- **Topic table pins are verified only where a scenario question has a gold label.** `bdrag topics` on the laptop's index lists what every topic resolves to; check the rest by hand. The general-guidance fallback has no evaluation of its own (it is off in eval runs).
+- **int8 reranking changes the order slightly.** On 20 Bangla/English excerpts its top 5 matched fp32 in 4 of 5 places (Spearman 0.91-0.97); bf16 is the better choice where the CPU supports it natively. Measure int8 on the eval set before serving it.
+- **Contextual chunk headers are not re-run.** `bdrag contextualize` could help the "many acts share the vocabulary" ranking misses, but it needs a full re-embed; do it after the measurements above.
+- **Evaluation set size.** 86 held-out questions is enough to compare configurations, not enough to claim tight confidence intervals. 16 more are drafted in `data/eval/eval_v2_draft.jsonl` and await review (`data/eval/REVIEW_V2.md`).
+- **Judge model.** Answer correctness is judged by an LLM. The judge is required to differ from the answering model, but it has not been calibrated against human labels. (Earlier answers files lack the judge's verdicts, so calibration needs a fresh `bdrag e2e` run.)
+- **Corpus scope.** Answers come only from the 1,354 acts ingested. Rules, SROs, gazette notifications and case law are not in the corpus, so questions that depend on them get a partial answer or NOT_FOUND.
 
 ## Next steps
 
-1. Run `QdrantStore` against a local Qdrant and compare its top-k against `NumpyStore` on the same queries.
-2. Turn the scripts into entry points and remove the path adjustment.
-3. Grow the evaluation set and add a human-labelled sample to calibrate the judge.
+1. Run `RUN_UPGRADES.bat` on the laptop; serve `--translate` and the reranker only if they win on `results/UPGRADES.md`.
+2. Review the drafted v2 questions and the `sr02` gold label.
+3. Grade 40 answers with `bdrag calibrate-judge ... --export grade.csv` (judge: `--judge-provider groq`) to get the judge's kappa.
+4. Measure a Qdrant server's HNSW recall against `NumpyStore` on the real index.
