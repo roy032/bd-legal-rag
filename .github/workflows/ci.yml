@@ -183,7 +183,8 @@ jobs:
         with: { python-version: "3.12", cache: pip, cache-dependency-path: pyproject.toml }
       - uses: actions/setup-node@v4
         with: { node-version: "22" }
-      - run: pip install -e ".[serve]"
+      # dev: the fixture server reuses the test suite's components (starlette's TestClient needs httpx2).
+      - run: pip install -e ".[serve,dev]"
       - run: |
           npm i --no-save playwright@1.56.1 axe-core@4.10.2
           npx playwright install --with-deps chromium
@@ -191,4 +192,5 @@ jobs:
         run: |
           python tests/a11y/serve.py --port 8765 &
           for i in $(seq 1 30); do curl -fsS localhost:8765/livez && break; sleep 1; done
+          curl -fsS localhost:8765/livez
           node tests/a11y/axe.mjs http://127.0.0.1:8765
