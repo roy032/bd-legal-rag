@@ -286,5 +286,19 @@ class TestServiceResilience(unittest.TestCase):
         self.assertNotIn("wp-login", text)
 
 
+class TestLoadTestSLO(unittest.TestCase):
+    def test_summary_and_breaches(self):
+        from bdrag_tools.loadtest import slo_breaches, summarize
+
+        results = [(0.01 * i, 200) for i in range(1, 20)] + [(2.0, 500)]
+        s = summarize(results, elapsed=2.0)
+        self.assertEqual((s["requests"], s["ok"], s["error_rate"]), (20, 19, 0.05))
+        self.assertEqual(s["p95_ms"], 2000.0)
+        self.assertEqual(slo_breaches(s, None, None), [])
+        self.assertEqual(len(slo_breaches(s, 500, 0.0)), 2)
+        self.assertEqual(slo_breaches(s, 2500, 0.1), [])
+        self.assertEqual(slo_breaches(summarize([], 1.0), None, None), ["no requests completed"])
+
+
 if __name__ == "__main__":
     unittest.main()

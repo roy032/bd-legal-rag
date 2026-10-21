@@ -214,6 +214,7 @@ class ServiceConfig:
             cache_ttl_s=_env_float("BDRAG_CACHE_TTL", 1800.0) or 0.0,
             rate_per_min=_env_float("BDRAG_RATE_PER_MIN", 20.0) or 20.0,
             daily_limit=_env_int("BDRAG_DAILY_LIMIT", 0),
+            burst=_env_int("BDRAG_BURST", 5),
             api_keys=keys,
             require_api_key=_env_bool("BDRAG_REQUIRE_API_KEY", False),
             entailer=_env_str("BDRAG_ENTAILER", "none"),

@@ -7,8 +7,9 @@ so quality regressions are caught the same way syntax errors are.
 
   python scripts/ci_eval_gate.py --baseline results/baseline.json --tolerance 0.03
 
-Create the baseline once from a run you trust:
-  python scripts/eval_retrieval.py --label baseline && cp results/baseline.json results/
+Create the baseline once from a run you trust, and commit it (results/*.json is
+git-ignored; results/baselines/ is not):
+  python scripts/eval_retrieval.py --label baseline && cp results/baseline.json results/baselines/
 """
 from __future__ import annotations
 
