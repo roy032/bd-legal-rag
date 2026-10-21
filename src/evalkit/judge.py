@@ -5,7 +5,11 @@ Two kinds of check, and the difference matters:
 DETERMINISTIC (free, exact, run on every answer)
   refusal_correct      unanswerable question -> refused; answerable -> answered
   citation_validity    every [n] points at a real excerpt
-  citation_precision   share of cited excerpts that are gold sections
+  citation_precision   share of cited excerpts that are gold sections (undefined, not 0,
+                       when nothing is cited: a refusal is scored by refusal_correct)
+  citation_support     share of cited excerpts that are gold OR entail a claim cited to
+                       them — a judge-free precision that does not punish a correct
+                       citation to a section the eval set did not list as gold
   gold_cited           the gold section was actually cited, not merely retrieved
   citation_coverage    share of factual sentences that carry a citation
   quote_fidelity       share of quoted spans that appear verbatim in a cited excerpt
@@ -24,6 +28,7 @@ a second opinion from the same kind of machine.
 from __future__ import annotations
 
 import json
+import math
 import re
 
 from evalkit.dataset import EvalItem, section_key
@@ -73,12 +78,20 @@ def _parse_json(text: str) -> dict:
         return {}
 
 
-def deterministic_scores(item: EvalItem, answer, ) -> dict:
-    """`answer` is a rag.answer.Answer."""
+def entailed_citations(answer, entailer, threshold: float = 0.55) -> set[int]:
+    """Excerpt numbers that, on their own, support a claim the answer cites them for."""
+    from rag.guardrails import claims_with_citations
+
+    return {n for claim, cited in claims_with_citations(answer.text, len(answer.hits))
+            for n in cited if entailer.score(answer.hits[n - 1].body, claim) >= threshold}
+
+
+def deterministic_scores(item: EvalItem, answer, entailer=None) -> dict:
+    """`answer` is a rag.answer.Answer. `entailer` (rag.entail) adds citation_support."""
     gold = set(item.gold)
     retrieved_keys = [section_key(h.metadata) for h in answer.hits]
-    cited_keys = [section_key(answer.hits[n - 1].metadata) for n in answer.cited
-                  if 1 <= n <= len(answer.hits)]
+    cited = [n for n in answer.cited if 1 <= n <= len(answer.hits)]
+    cited_keys = [section_key(answer.hits[n - 1].metadata) for n in cited]
 
     scores = {
         "refusal_correct": float(answer.refused != item.answerable),
@@ -99,8 +112,13 @@ def deterministic_scores(item: EvalItem, answer, ) -> dict:
         scores["gold_retrieved"] = float(bool(gold & set(retrieved_keys)))
         scores["gold_cited"] = float(bool(gold & set(cited_keys)))
         scores["citation_precision"] = (
-            sum(c in gold for c in cited_keys) / len(cited_keys) if cited_keys else 0.0
+            sum(c in gold for c in cited_keys) / len(cited_keys) if cited_keys else math.nan
         )
+    if entailer is not None and cited and not answer.refused:
+        entailed = entailed_citations(answer, entailer)
+        scores["citation_support"] = sum(
+            key in gold or n in entailed for n, key in zip(cited, cited_keys, strict=True)
+        ) / len(cited)
     return scores
 
 

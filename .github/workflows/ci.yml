@@ -27,7 +27,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: pyproject.toml
-      - run: pip install -e ".[serve,dev,qdrant]"
+      - run: pip install -e ".[serve,dev,qdrant,otel]"
 
       - name: Lint
         run: ruff check src scripts tests
@@ -63,6 +63,9 @@ jobs:
             --chunks data/sample/chunks.jsonl --index data/sample/index \
             --embedder hashing --provider echo --no-judge --label ci-adversarial \
             --results /tmp/results -k 3
+
+      - name: Red team (injection and personal data, Bangla, English, romanised)
+        run: python scripts/redteam.py --json-out /tmp/results/redteam.json
 
   security:
     runs-on: ubuntu-latest

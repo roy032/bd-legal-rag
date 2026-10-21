@@ -4,7 +4,17 @@ from __future__ import annotations
 from evalkit.metrics import paired_bootstrap
 
 GEN_METRICS = ("faithfulness", "correctness", "refusal_correct", "gold_cited",
+               "citation_precision", "citation_support",
                "citation_coverage", "quote_fidelity", "clean_first_pass")
+
+
+def per_question(run: dict, metric: str) -> dict:
+    """{question id: score} from the retrieval rows, or from the answer rows for a
+    generation metric such as citation_precision."""
+    rows = run.get("per_query", [])
+    if not any(metric in q for q in rows):
+        rows = run.get("generation_per_query", [])
+    return {q["id"]: q[metric] for q in rows if metric in q}
 
 
 def cell(stats: dict, metric: str) -> str:
@@ -56,15 +66,15 @@ def paired_report(runs: list[dict], baseline_label: str, metric: str = "recall@5
     base = next((r for r in runs if r["label"] == baseline_label), None)
     if base is None:
         return f"(no run labelled '{baseline_label}')"
-    bscores = {q["id"]: q.get(metric) for q in base["per_query"]}
-    if all(v is None for v in bscores.values()):
+    bscores = per_question(base, metric)
+    if not bscores:
         return f"(baseline has no {metric} — was it run with a smaller k?)"
     out = [f"Paired comparison on {metric} vs '{baseline_label}' (same questions, 2000 resamples):"]
     for r in runs:
         if r["label"] == baseline_label:
             continue
-        rscores = {q["id"]: q.get(metric) for q in r["per_query"]}
-        ids = [i for i in bscores if bscores[i] is not None and rscores.get(i) is not None]
+        rscores = per_question(r, metric)
+        ids = [i for i in bscores if i in rscores]
         if not ids:
             out.append(f"  {r['label']:<26} skipped — no {metric} in this run")
             continue

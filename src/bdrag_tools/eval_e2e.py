@@ -7,6 +7,12 @@ every change you ship, not on every experiment.
   export RAG_LLM=anthropic ANTHROPIC_API_KEY=...
   python scripts/eval_e2e.py --label baseline --judge-provider openai
   python scripts/eval_e2e.py --label baseline-nojudge --no-judge   # deterministic only, free
+
+Citation precision (cited sections that are gold) and citation support (gold, or
+the cited excerpt entails the claim) are printed by question type. Compare two
+runs question by question:
+
+  bdrag compare results/last.json results/new.json --baseline last --metric citation_precision
 """
 from __future__ import annotations
 
@@ -54,6 +60,9 @@ def main() -> None:
     ap.add_argument("--allow-uncited", type=float, default=0.34)
     ap.add_argument("--agent", action="store_true", help="evaluate the agentic loop")
     ap.add_argument("--max-steps", type=int, default=5)
+    ap.add_argument("--support-entailer", choices=["lexical", "nli", "none"], default="lexical",
+                    help="scores citation_support (cited excerpt is gold or entails the claim); "
+                         "scoring only, the guard is unchanged. lexical is free and instant")
     ap.add_argument("--repeats", type=int, default=1,
                     help="run each question N times and report the spread — one run of an "
                          "LLM metric is an anecdote")
@@ -82,6 +91,8 @@ def main() -> None:
     agent = (LegalAgent(retriever, load_records(args.index, args.chunks), llm,
                         AgentConfig(max_steps=args.max_steps, per_call_k=args.k, guard=guard))
              if args.agent else None)
+    from rag.entail import get_entailer
+    support_entailer = get_entailer(args.support_entailer)
     search_kw: dict[str, Any] = {}
     generation: list[dict[str, Any]] = []
     answers: list[dict[str, Any]] = []
@@ -100,7 +111,8 @@ def main() -> None:
             print(f"[{n}/{len(items)}] {it.id} ERROR {str(e)[:120]}")
             continue
         row = {"id": f"{it.id}#{repeat}" if args.repeats > 1 else it.id,
-               **deterministic_scores(it, ans)}
+               "type": it.type, "language": it.language,
+               **deterministic_scores(it, ans, entailer=support_entailer)}
         if agent:
             row["agent_steps"] = float(ans.checks.get("steps", 0))
             row["llm_calls"] = float(ans.llm_calls)

@@ -55,6 +55,7 @@ from rag.agent import AgentConfig, LegalAgent
 from rag.answer import answer_question, answer_question_stream
 from rag.guardrails import GuardConfig
 from rag.llm import LLMError
+from rag.pii import redact
 from rag.pipeline import RetrievalConfig, index_fingerprint
 from service.backends import make_cache, make_limiter
 from service.cache import cache_key
@@ -168,6 +169,9 @@ class ServiceConfig:
     breaker_cooldown_s: float = 30.0
     max_body_bytes: int = 16_384     # requests larger than this get 413
     metrics_token: str = ""          # set to require "Authorization: Bearer <token>" on /metrics
+    # Replace phone, NID, card, passport numbers and emails in questions and feedback
+    # before they reach the model, the cache or the logs (rag/pii.py).
+    redact_pii: bool = True
 
     @classmethod
     def from_env(cls) -> ServiceConfig:
@@ -233,6 +237,7 @@ class ServiceConfig:
             breaker_cooldown_s=_env_float("BDRAG_BREAKER_COOLDOWN", 30.0) or 30.0,
             max_body_bytes=_env_int("BDRAG_MAX_BODY", 16_384),
             metrics_token=_env_str("BDRAG_METRICS_TOKEN", ""),
+            redact_pii=_env_bool("BDRAG_REDACT_PII", True),
         )
 
 
@@ -468,6 +473,16 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
             body = {}
         return body if isinstance(body, dict) else {}
 
+    def read_question(body: dict) -> str:
+        """The question as everything downstream sees it: personal identifiers are
+        replaced here, before the model, the cache, the logs or the answer store."""
+        question = str(body.get("question") or "").strip()
+        if cfg.redact_pii:
+            question, kinds = redact(question)
+            for kind in kinds:
+                metrics.inc("pii_redacted_total", kind=kind)
+        return question
+
     def clamp_k(value) -> int:
         try:
             return max(1, min(int(value), cfg.max_k))
@@ -639,7 +654,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         if blocked is not None:
             return blocked
         body = await payload(request)
-        question = (body.get("question") or "").strip()
+        question = read_question(body)
         if not question:
             return JSONResponse({"error": "question is required"}, status_code=400)
         await run_in_threadpool(build)
@@ -702,7 +717,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         if (capped := over_daily_limit()) is not None:
             return capped
         body = await payload(request)
-        question = (body.get("question") or "").strip()
+        question = read_question(body)
         if not question:
             return JSONResponse({"error": "question is required"}, status_code=400)
         if len(question) > 500:
@@ -809,7 +824,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         if (capped := over_daily_limit()) is not None:
             return capped
         body = await payload(request)
-        question = (body.get("question") or "").strip()
+        question = read_question(body)
         if not question:
             return JSONResponse({"error": "question is required"}, status_code=400)
         if len(question) > 500:
@@ -906,9 +921,12 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         if rating not in ("up", "down"):
             return JSONResponse({"error": "rating must be 'up' or 'down'"}, status_code=400)
         stored = recent.get(answer_id, {})
+        comment = str(body.get("comment") or "")
+        if cfg.redact_pii:
+            comment = redact(comment)[0]
         _append_jsonl(cfg.feedback_path, {
             "ts": time.time(), "id": answer_id, "rating": rating,
-            "comment": (body.get("comment") or "")[:1000],
+            "comment": comment[:1000],
             "question": stored.get("question"), "answer": stored.get("answer"),
             "sources": [s.get("chunk_id") for s in stored.get("sources", [])],
             "failures": stored.get("failures"),
@@ -989,6 +1007,9 @@ app = None  # built on demand by `uvicorn service.app:get_app --factory`
 
 def get_app() -> Starlette:
     from service.logs import configure
+    from service.tracing import configure_otel
 
     configure(os.environ.get("LOG_LEVEL", "INFO"), os.environ.get("LOG_FORMAT", "text"))
+    if configure_otel():
+        log.info("exporting traces to %s", os.environ["BDRAG_OTEL_ENDPOINT"])
     return create_app()

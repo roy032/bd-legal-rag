@@ -39,6 +39,7 @@ COMMANDS = {
     "feedback-to-eval": "feedback_to_eval",
     "measure-upgrades": "measure_upgrades",
     "topics": "topics",
+    "redteam": "redteam",
 }
 SCRIPTS = COMMANDS          # old name, kept for anything that imported it
 
