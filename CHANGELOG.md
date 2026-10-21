@@ -5,6 +5,25 @@ open is in [IMPROVEMENTS.md](IMPROVEMENTS.md).
 
 ## Unreleased
 
+### Service
+- Probes: `GET /livez` (the process answers) and `GET /readyz` (200 once the index and
+  models are loaded; never starts the load). `/health` is unchanged.
+- Admission control (`BDRAG_MAX_INFLIGHT`, `BDRAG_MAX_QUEUE`): past the limit a question
+  gets the matching sections at once with `503` and `Retry-After`, instead of queueing
+  behind a CPU-bound model until it times out.
+- Circuit breaker on the answering model (`BDRAG_BREAKER_FAILURES`,
+  `BDRAG_BREAKER_COOLDOWN`): after repeated failures the service stops calling it for a
+  cooldown and answers from retrieval at once; one trial answer closes it again.
+- Identical questions arriving together run the model once (single-flight).
+- Streamed answers are cached too, and shared with `/ask`; a repeated question replays
+  the final answer instead of generating it again.
+- Prometheus histograms (`_bucket`/`_sum`/`_count`) instead of window quantiles, gauges for
+  answers running and waiting, the circuit and readiness, and time to first token.
+  Metrics are labelled by route template, so permalinks and scanners no longer add series.
+- `LOG_FORMAT=json` structured logs carrying the request id; a caller's `X-Request-Id` is
+  kept only if it is short and plain. Request bodies over `BDRAG_MAX_BODY` get `413`;
+  `/feedback` is rate limited; `/metrics` can require a token (`BDRAG_METRICS_TOKEN`).
+
 ### Retrieval
 - The topic table now also catches unpaid wages, a purchase gone wrong and defamation
   when people describe them in their own words ("my boss hasn't paid me", "the seller

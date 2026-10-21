@@ -104,7 +104,25 @@ class TestMetrics(unittest.TestCase):
         m.observe("answer", 0.4)
         text = m.prometheus()
         self.assertIn('answers_total{outcome="refused"} 1.0', text)
-        self.assertIn('answer_seconds{quantile="p50"} 0.4', text)
+        self.assertIn("# TYPE answer_seconds histogram", text)
+        self.assertIn('answer_seconds_bucket{le="0.25"} 0', text)
+        self.assertIn('answer_seconds_bucket{le="0.5"} 1', text)
+        self.assertIn('answer_seconds_bucket{le="+Inf"} 1', text)
+        self.assertIn("answer_seconds_count 1", text)
+
+    def test_histogram_buckets_are_cumulative_and_labelled(self):
+        m = Metrics()
+        for v in (0.02, 0.3, 7.0, 500.0):
+            m.observe("request", v, path="/ask")
+        m.set_gauge("inflight_answers", 2)
+        text = m.prometheus()
+        self.assertIn('request_seconds_bucket{path="/ask",le="0.025"} 1', text)
+        self.assertIn('request_seconds_bucket{path="/ask",le="0.5"} 2', text)
+        self.assertIn('request_seconds_bucket{path="/ask",le="10.0"} 3', text)
+        self.assertIn('request_seconds_bucket{path="/ask",le="+Inf"} 4', text)
+        self.assertIn('request_seconds_sum{path="/ask"} 507.32', text)
+        self.assertIn("# TYPE inflight_answers gauge", text)
+        self.assertIn("inflight_answers 2", text)
 
 
 def fake_components():

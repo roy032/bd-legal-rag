@@ -132,6 +132,8 @@ OCR, and prints the command that fixes each failure.
 | `OLLAMA_KEEP_ALIVE=30m`, `RAG_EXCERPT_CHARS=1000` | keeps the model loaded between questions; shorter excerpts make a CPU start answering sooner |
 | `BDRAG_MODELS=ollama:gemma4:e4b,groq:llama-3.3-70b-versatile` | adds a model picker to the page; hosted entries appear only when their key is set, and the page says the question leaves the machine |
 | `BDRAG_DAILY_LIMIT=500` | caps answers per day on a public demo |
+| `BDRAG_MAX_INFLIGHT=2`, `BDRAG_MAX_QUEUE=8` | how many answers run at once and wait; past that a visitor gets the matching sections straight away instead of a minute-long wait ([operations](docs/OPERATIONS.md)) |
+| `LOG_FORMAT=json` | one JSON log line per event, stamped with the request id |
 
 `RUN_UPGRADES.bat` (or `bdrag measure-upgrades`) measures translation, the reranker and
 the answering model on the test and scenario sets and writes `results/UPGRADES.md`.
@@ -190,6 +192,7 @@ tests/             offline test suite
 | Document | What is in it |
 |---|---|
 | [docs/RUNBOOK_WINDOWS.md](docs/RUNBOOK_WINDOWS.md) | the full run on a Windows laptop, from downloaded pages to evaluated system |
+| [docs/OPERATIONS.md](docs/OPERATIONS.md) | running the service: probes, load shedding, circuit breaker, metrics, logs, alerts |
 | [docs/DATA_CARD.md](docs/DATA_CARD.md) | what the corpus contains and leaves out |
 | [docs/adr/](docs/adr/) | design decisions, one file each |
 | [docs/BUILD_NOTES.md](docs/BUILD_NOTES.md) | the build log, phase by phase |

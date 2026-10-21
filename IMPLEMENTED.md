@@ -170,6 +170,8 @@ Suite: ruff clean, mypy clean, every `src/` module exercised.
 | Source cards with the excerpt text, copy answer | **Done** | `service/static/index.html` |
 | Judge calibration: the report compared humans with "a reason exists" (always faithful); now with the verdicts, plus spreadsheet grading and correctness | **Fixed** | `bdrag calibrate-judge --export/--import` |
 | Daily answer cap for a public demo | **Done** | `BDRAG_DAILY_LIMIT` |
+| Liveness/readiness probes, admission control, circuit breaker, single-flight, streamed-answer cache | **Done** | `/livez`, `/readyz`, `service/resilience.py`, [OPERATIONS.md](docs/OPERATIONS.md) |
+| Prometheus histograms, route-labelled metrics, JSON logs with request id | **Done** | `service/metrics.py`, `service/logs.py`, `LOG_FORMAT=json` |
 | Count scanned / missing acts before OCR | **Done** | `bdrag coverage` |
 | Thumbs-down answers become draft eval questions | **Done** | `bdrag feedback-to-eval` |
 | One command to measure all of it on the laptop | **Done** — not yet run | `RUN_UPGRADES.bat`, `bdrag measure-upgrades` |
