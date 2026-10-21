@@ -104,9 +104,16 @@ jobs:
             --out /tmp/index --embedder hashing --bm25
           chmod -R a+rX /tmp/index
 
+      # Hardened as in production: read-only root filesystem, no capabilities, no
+      # privilege escalation. Only /tmp and the log directory are writable.
       - name: Start the container
         run: |
           docker run -d --name api -p 8000:8000 -v /tmp/index:/app/data/index:ro \
+            --read-only --tmpfs /tmp:size=64m \
+            --tmpfs /app/data/logs:size=16m,uid=10001,gid=10001 \
+            --cap-drop ALL --security-opt no-new-privileges:true \
+            -e BDRAG_FEEDBACK=/app/data/logs/feedback.jsonl \
+            -e BDRAG_ANALYTICS=/app/data/logs/queries.jsonl \
             -e RAG_LLM=echo -e LOG_FORMAT=json \
             -e BDRAG_RATE_PER_MIN=100000 -e BDRAG_BURST=1000 bd-legal-rag:ci
           for i in $(seq 1 60); do
@@ -132,6 +139,26 @@ jobs:
           curl -fsS localhost:8000/metrics | grep -q 'request_seconds_bucket{path="/search"'
           docker logs api 2>&1 | grep '"route": "/search"' | head -1 | python -c "import json,sys; json.loads(sys.stdin.read())"
 
+      - name: Read-only root filesystem, and personal data never stored
+        run: |
+          if docker exec api sh -c 'touch /app/probe' 2>/dev/null; then
+            echo "the root filesystem is writable"; exit 1
+          fi
+          curl -fsS -X POST localhost:8000/feedback -H 'content-type: application/json' \
+            -d '{"id":"x","rating":"down","comment":"call me on 01712345678"}'
+          docker exec api cat /app/data/logs/feedback.jsonl | grep -q '\[phone\]'
+          ! docker exec api grep -q 01712345678 /app/data/logs/feedback.jsonl
+          ! docker logs api 2>&1 | grep -q 'could not append'
+
+      # Software bill of materials for the image: every OS and Python package in it.
+      - name: SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: bd-legal-rag:ci
+          format: spdx-json
+          output-file: /tmp/sbom.spdx.json
+          upload-artifact: false
+
       - name: Container logs
         if: failure()
         run: docker logs api 2>&1 | tail -100
@@ -139,6 +166,29 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: loadtest
-          path: /tmp/load.json
+          name: loadtest-and-sbom
+          path: |
+            /tmp/load.json
+            /tmp/sbom.spdx.json
           if-no-files-found: ignore
+
+  # The UI is the product for most visitors: axe-core (WCAG 2.1 AA) on the home
+  # page, settings and an answer, in Bangla and English, light and dark, plus a
+  # keyboard-only pass. A canned model on the test corpus; nothing downloaded.
+  accessibility:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip, cache-dependency-path: pyproject.toml }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - run: pip install -e ".[serve]"
+      - run: |
+          npm i --no-save playwright@1.56.1 axe-core@4.10.2
+          npx playwright install --with-deps chromium
+      - name: axe and keyboard checks
+        run: |
+          python tests/a11y/serve.py --port 8765 &
+          for i in $(seq 1 30); do curl -fsS localhost:8765/livez && break; sleep 1; done
+          node tests/a11y/axe.mjs http://127.0.0.1:8765

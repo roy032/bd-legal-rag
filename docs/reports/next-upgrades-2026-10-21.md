@@ -46,6 +46,10 @@ Effort: S under a day, M one to three days.
 | 8 | **Contextual chunk headers re-run with gemma4**, then re-embed and ablate | M | yes | the "many acts share vocabulary" ranking misses remain the largest failure bucket |
 | 9 | **Accessibility audit of the UI** (axe in CI on the built page, keyboard-only pass, Bangla screen-reader labels) | S | no | the page is the product for most visitors |
 
+Done on 2026-10-21 without the laptop: #3 (code; the run needs the laptop), #5, #6
+(the static half; the gemma4 run is `bdrag redteam --provider ollama --llm-model
+gemma4:e4b --index data/index`), #7 and #9. See the changelog.
+
 Not recommended now: a vector database server (43,966 chunks fit in memory and search
 in milliseconds), Kubernetes manifests (one container on a laptop or a Space), and
 fine-tuning (the eval set is too small to show a gain).

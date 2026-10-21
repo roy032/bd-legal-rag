@@ -78,6 +78,53 @@ with each stage's time. Every line logged while a request runs carries its
 LOG_FORMAT=json bdrag serve 2>&1 | jq 'select(.status >= 500 or .level == "error")'
 ```
 
+### Traces in Jaeger or Grafana Tempo
+
+The trace line can also go to OpenTelemetry. Install the extra and point the service
+at an OTLP/HTTP collector:
+
+```bash
+pip install -e ".[otel]"
+docker run -d -p 16686:16686 -p 4318:4318 jaegertracing/all-in-one   # a local viewer
+BDRAG_OTEL_ENDPOINT=http://localhost:4318/v1/traces bdrag serve
+```
+
+Each request becomes a `bdrag search` or `bdrag ask` span carrying the request id, with
+a child per stage (`retrieve`, `answer`, `degraded_retrieval`). `OTEL_SERVICE_NAME`
+renames the service (default `bd-legal-rag`). A collector that is down costs a warning
+in the log, never a failed request. Without the endpoint nothing is exported.
+
+## Personal data
+
+People describe their own case and paste their phone, NID or card number into the box.
+With `BDRAG_REDACT_PII=true` (the default) the service replaces Bangladeshi mobile
+numbers, NID numbers (10, 13 or 17 digits), card and passport numbers and email
+addresses, in ASCII or Bangla digits, with `[phone]`, `[NID]`, `[card]`, `[passport]`
+and `[email]` as the request arrives. The model (often a hosted free API), the cache,
+`data/queries.jsonl`, `data/feedback.jsonl` and the answer's permalink only ever see the
+placeholder. `pii_redacted_total{kind}` counts them. Section numbers, years and amounts
+are not touched; `bdrag redteam` checks both directions on 52 probes in Bangla, English
+and romanised Bangla, and runs in CI.
+
+## Container hardening
+
+The image runs as a non-root user. Run it with a read-only root filesystem, no Linux
+capabilities and no privilege escalation; only the index, the logs, the model cache and
+`/tmp` need to be mounted:
+
+```bash
+docker run --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true \
+  -v "$PWD/data/index:/app/data/index:ro" \
+  -v bdrag-logs:/app/data/logs -e BDRAG_FEEDBACK=/app/data/logs/feedback.jsonl \
+  -e BDRAG_ANALYTICS=/app/data/logs/queries.jsonl \
+  -v bdrag-hf:/app/.cache/huggingface -p 8000:8000 bd-legal-rag
+```
+
+`docker-compose.yml` already does this (`read_only: true`, `./data` and the model cache
+mounted). CI starts the image this way and fails if the root filesystem is writable.
+Each published GitHub release gets the image's SBOM (SPDX and CycloneDX, from syft)
+attached by `.github/workflows/release.yml`; CI keeps one per run as an artifact.
+
 ## Limits
 
 | Setting | Default | Notes |
