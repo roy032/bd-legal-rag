@@ -184,8 +184,9 @@ class SingleFlight:
                 self.shared += 1
         if not leader:
             call.done.wait()
-            if call.error is not None:
-                raise call.error
+            error = call.error
+            if isinstance(error, BaseException):
+                raise error
             return call.result, True
         try:
             call.result = fn()

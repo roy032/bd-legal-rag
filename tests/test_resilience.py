@@ -63,8 +63,12 @@ class TestAdmission(unittest.TestCase):
 
     def test_slot_is_released_when_the_work_fails(self):
         adm = Admission(max_inflight=1, max_queue=0)
-        with self.assertRaises(ValueError), adm.slot():
-            raise ValueError("model crashed")
+
+        def crash():
+            with adm.slot():
+                raise ValueError("model crashed")
+
+        self.assertRaises(ValueError, crash)
         with adm.slot():                                  # still usable
             self.assertEqual(adm.stats()["inflight"], 1)
 
