@@ -17,6 +17,13 @@ the bdlaws act id as a hint) and the sections a lawyer would open first. The
 pipeline looks those sections up and gives them reserved places in the
 results, next to whatever the search found.
 
+Trigger words alone missed the same three situations when people described them
+in their own words ("my boss hasn't paid me", "the seller won't take it back",
+"telling everyone I am a thief"). Those get a second entry under the same name:
+a broader word plus a word that places it (a job, a purchase gone wrong, spreading
+a lie). data/eval/eval_gaps.jsonl holds 13 such questions, written before the
+entries were.
+
 Sections marked VERIFIED are also gold sections of data/eval/eval_scenarios.jsonl.
 Every number here was checked against the full index on 2026-10-19 with
 `bdrag topics` (43,966 chunks): each resolves to the section its topic means.
@@ -100,6 +107,17 @@ TOPICS: tuple[Topic, ...] = (
                          "posted lies", "মিথ্যা অপপ্রচার", "কুৎসা"), (
         ActRef(PENAL, ("499", "500"), 11),                                       # VERIFIED
     )),
+    # How people describe defamation without the word: a lie, plus harm to their name
+    # or the act of spreading it.
+    Topic("defamation", ("reputation", "good name", "সম্মানহানি", "সুনাম", "মান-সম্মান",
+                         "সম্মান নষ্ট", "চরিত্র হনন"), (
+        ActRef(PENAL, ("499", "500"), 11),
+    )),
+    Topic("defamation", ("false", "untrue", "lies!", "lying about", "lied about", "মিথ্যা"), (
+        ActRef(PENAL, ("499", "500"), 11),
+    ), also=("telling everyone", "told everyone", "telling people", "spreading", "spread",
+             "sharing", "posted", "posting", "publish", "online", "social media", "facebook",
+             "about me", "আমার নামে", "আমার বিরুদ্ধে", "ছড়া", "রটা", "পোস্ট", "ফেসবুক")),
     Topic("cheque", ("cheque", "check bounce", "bounced check", "চেক ডিজঅনার", "চেক বাউন্স",
                      "চেক ফেরত", "চেকের টাকা", "চেক প্রত্যাখ্যা", "চেক দিয়ে"), (
         ActRef(("negotiable instruments act", "হস্তান্তরযোগ্য দলিল আইন"), ("138",), 46),  # VERIFIED
@@ -113,9 +131,29 @@ TOPICS: tuple[Topic, ...] = (
                        "মিথ্যা বিজ্ঞাপন", "sold me", "shopkeeper", "দোকানদার"), (
         ActRef(CONSUMER, ("45", "60", "66"), 1014),                              # VERIFIED
     )),
+    # A purchase that went wrong, told without "consumer" or "defective": the English
+    # question has no word in common with the Bangla act, so the table has to bridge it.
+    Topic("consumer", ("bought", "buying", "purchas", "seller", "shop", "store", "pharmacy",
+                       "restaurant", "online order", "কেনা", "কিনেছি", "কিনেছিলাম", "কিনলাম",
+                       "বিক্রেতা", "দোকান", "ফার্মেসি", "রেস্তোরাঁ", "রেস্টুরেন্ট"), (
+        ActRef(CONSUMER, ("45", "60", "66"), 1014),
+    ), also=("broke", "broken", "stopped working", "not working", "damaged", "rotten", "spoil",
+             "stale", "fake", "counterfeit", "refund", "replace", "take it back", "take back", "return",
+             "never delivered", "not delivered", "didn't deliver", "did not deliver",
+             "printed price", "mrp", "নষ্ট", "ফেরত", "ভেজাল", "পচা", "নকল", "বদলে", "বেশি দাম",
+             "দাম বেশি", "সরবরাহ")),
     Topic("wages", ("wage", "salary", "salaries", "overtime", "মজুরি", "বেতন"), (
         ActRef(LABOUR, ("123", "132"), 952),                                     # VERIFIED
     )),
+    # Unpaid work described without "wage" or "salary": a missing payment plus a job.
+    Topic("wages", ("paid me", "pay me", "paying me", "unpaid", "my pay!", "their pay!",
+                    "last pay", "delaying pay", "owe me", "owes me", "earnings", "dues!",
+                    "পারিশ্রমিক", "বকেয়া", "পাওনা", "টাকা দেয়নি", "টাকা দিচ্ছে না",
+                    "টাকা দিচ্ছেন না"), (
+        ActRef(LABOUR, ("123", "132"), 952),
+    ), also=("employer", "boss", "factory", "company", "worker", "workers", "job", "office",
+             "resigned", "garment", "মালিক", "অফিস", "কারখানা", "শ্রমিক", "চাকরি", "কোম্পানি",
+             "বস", "গার্মেন্টস")),
     Topic("dismissal", ("dismiss", "fired", "terminat", "retrench", "laid off", "sacked",
                         "বরখাস্ত", "ছাঁটাই", "চাকরিচ্যুত", "চাকরি থেকে বের", "অব্যাহতি"), (
         ActRef(LABOUR, ("26", "33"), 952),                                       # 26 VERIFIED
@@ -200,8 +238,14 @@ TOPICS: tuple[Topic, ...] = (
 
 
 def match_topics(question: str, topics: tuple[Topic, ...] = TOPICS) -> list[Topic]:
+    """Matching topics, most specific first. Entries sharing a name are other ways of
+    describing the same situation (they name the same acts), so each name counts once."""
     q = _norm(nfc(question))
-    return [t for t in topics if t.matches(q)]
+    found: dict[str, Topic] = {}
+    for t in topics:
+        if t.name not in found and t.matches(q):
+            found[t.name] = t
+    return list(found.values())
 
 
 class TopicIndex:

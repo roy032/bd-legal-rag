@@ -5,13 +5,17 @@
   bdrag measure-upgrades --e2e full         # also answer all 86 test questions (hours on CPU)
   bdrag measure-upgrades --e2e none         # retrieval only
 
-Retrieval, on the test set (eval.jsonl) and the scenario set (eval_scenarios.jsonl):
+Retrieval, on the test set (eval.jsonl), the scenario set (eval_scenarios.jsonl) and
+the paraphrased gap set (eval_gaps.jsonl):
   served          the configuration the service uses today
   +translate      also search the question in the other language (one local model call)
   +rerank         bge-reranker-v2-m3 over the top 20 (int8, or bf16 where the CPU has it)
   +both
 End to end: the answering model (default gemma4:e4b on Ollama) on the scenario set;
 judged by a free hosted model when GROQ_API_KEY is set, deterministic metrics otherwise.
+
+Results written before 2026-10-20 measured `served` without the topic table, which
+the service has used since 1.1.0: re-run with --redo.
 
 Writes results/upg-*.json and a table in results/UPGRADES.md. Needs data/index,
 data/processed/chunks.jsonl and Ollama running with the model pulled.
@@ -27,14 +31,15 @@ import time
 from pathlib import Path
 
 SERVED = ["--mode", "dense", "--expand-refs", "--synonyms", "--transliterate", "--resolve-refs",
-          "--boost-in-force", "--max-parts-per-section", "2"]
+          "--boost-in-force", "--topics", "--max-parts-per-section", "2"]
 VARIANTS = {
     "served": [],
     "translate": ["--translate"],
     "rerank": ["--rerank", "cross", "--rerank-top", "20"],
     "both": ["--translate", "--rerank", "cross", "--rerank-top", "20"],
 }
-SETS = {"test": "data/eval/eval.jsonl", "scenarios": "data/eval/eval_scenarios.jsonl"}
+SETS = {"test": "data/eval/eval.jsonl", "scenarios": "data/eval/eval_scenarios.jsonl",
+        "gaps": "data/eval/eval_gaps.jsonl"}
 
 
 def run(args: list[str]) -> bool:

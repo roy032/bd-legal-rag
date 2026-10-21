@@ -114,7 +114,8 @@ class TestDataset(unittest.TestCase):
         self.assertEqual(stats["n"], stats["answerable"] + stats["unanswerable"])
 
     def test_committed_eval_files_validate(self):
-        for name in ("eval.jsonl", "tune.jsonl", "eval_scenarios.jsonl", "eval_v2_draft.jsonl"):
+        for name in ("eval.jsonl", "tune.jsonl", "eval_scenarios.jsonl", "eval_v2_draft.jsonl",
+                     "eval_gaps.jsonl"):
             with self.subTest(name=name):
                 self.assertEqual(validate(load_eval(ROOT / "data/eval" / name)), [])
 
