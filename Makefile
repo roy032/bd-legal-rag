@@ -1,5 +1,5 @@
 .PHONY: help install dev test lint typecheck coverage ingest index eval ablate tune sweep \
-        calibrate failures gate serve demo doctor pdf loadtest docker-build docker-run clean
+        calibrate failures gate serve demo doctor pdf loadtest precommit docker-build docker-run clean
 PY ?= python
 EVAL ?= data/eval/eval.jsonl
 INDEX ?= data/index
@@ -69,14 +69,18 @@ demo:            ## end-to-end on the bundled sample corpus, no downloads
 		--index data/sample/index --embedder hashing --rerank-kind lexical -k 5
 
 loadtest:        ## throughput and p95 against a running server
-	$(PY) scripts/loadtest.py --url http://localhost:8000/search --concurrency 8 --requests 200
+	$(PY) scripts/loadtest.py --url http://localhost:8000/search --concurrency 8 --requests 200 \
+		--slo-p95-ms 500 --max-error-rate 0.01
 
 docker-build:    ## build the container
 	docker build -t bd-legal-rag .
 
 docker-run:      ## run the container with the local index mounted
 	docker run --rm -p 8000:8000 -v $(PWD)/data:/app/data \
-		-e RAG_LLM -e RAG_MODEL -e OLLAMA_HOST -e ANTHROPIC_API_KEY -e OPENAI_API_KEY bd-legal-rag
+		-e RAG_LLM -e RAG_MODEL -e OLLAMA_HOST -e GROQ_API_KEY -e GEMINI_API_KEY bd-legal-rag
+
+precommit:       ## install the git hooks (ruff, mypy, file checks) that mirror CI
+	$(PY) -m pip install pre-commit && pre-commit install
 
 clean:           ## remove caches and build artefacts
 	find . -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true

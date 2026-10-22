@@ -6,7 +6,9 @@ FastAPI is mechanical: the payloads below map one-to-one onto pydantic models.
 
 Endpoints
   GET  /                health-checked UI
-  GET  /health          liveness + what is loaded
+  GET  /health          what is loaded (loads it on first call)
+  GET  /livez           liveness probe: the process answers; never loads anything
+  GET  /readyz          readiness probe: 200 once the index and models are loaded
   GET  /stats           config, cache, cost projection
   GET  /metrics         Prometheus text
   POST /search          retrieval only — no model call, free and fast
@@ -23,7 +25,9 @@ Three things here that are easy to get wrong and expensive to get wrong:
 2. **The cache key includes the index fingerprint**, so rebuilding the index
    invalidates every cached answer instead of serving yesterday's pipeline.
 3. **The model failing degrades to retrieval results**, with a notice, rather
-   than a blank error page.
+   than a blank error page. The same happens when too many answers are already
+   running (admission control) and while the model's circuit breaker is open
+   after repeated failures (service/resilience.py).
 """
 from __future__ import annotations
 
@@ -55,7 +59,10 @@ from rag.pipeline import RetrievalConfig, index_fingerprint
 from service.backends import make_cache, make_limiter
 from service.cache import cache_key
 from service.cost import estimate_cost, project_monthly
+from service.logs import request_id as request_id_var
+from service.logs import safe_request_id
 from service.metrics import Metrics
+from service.resilience import Admission, Busy, CircuitBreaker, SingleFlight
 from service.tracing import Trace
 
 STATIC = Path(__file__).parent / "static"
@@ -151,6 +158,16 @@ class ServiceConfig:
     preload: bool = False            # load index and models at startup (from_env turns it on)
     cache_dir: str = "data/raw"        # honour X-Forwarded-For (only behind your own proxy)
     frame_ancestors: str = ""        # sites allowed to embed the UI in an iframe; empty = none
+    # Answers the model works on at once, and how many more may wait; beyond that a
+    # visitor gets the retrieved provisions at once. A local model on a laptop CPU
+    # serves one answer at a time well; 0 = no limit.
+    max_inflight: int = 2
+    max_queue: int = 8
+    # Model failures in a row that open the circuit, and how long it stays open.
+    breaker_failures: int = 3
+    breaker_cooldown_s: float = 30.0
+    max_body_bytes: int = 16_384     # requests larger than this get 413
+    metrics_token: str = ""          # set to require "Authorization: Bearer <token>" on /metrics
 
     @classmethod
     def from_env(cls) -> ServiceConfig:
@@ -197,6 +214,7 @@ class ServiceConfig:
             cache_ttl_s=_env_float("BDRAG_CACHE_TTL", 1800.0) or 0.0,
             rate_per_min=_env_float("BDRAG_RATE_PER_MIN", 20.0) or 20.0,
             daily_limit=_env_int("BDRAG_DAILY_LIMIT", 0),
+            burst=_env_int("BDRAG_BURST", 5),
             api_keys=keys,
             require_api_key=_env_bool("BDRAG_REQUIRE_API_KEY", False),
             entailer=_env_str("BDRAG_ENTAILER", "none"),
@@ -209,35 +227,69 @@ class ServiceConfig:
             preload=_env_bool("BDRAG_PRELOAD", True),
             cache_dir=_env_str("BDRAG_CACHE", "data/raw"),
             frame_ancestors=_env_str("BDRAG_FRAME_ANCESTORS", ""),
+            max_inflight=_env_int("BDRAG_MAX_INFLIGHT", 2),
+            max_queue=_env_int("BDRAG_MAX_QUEUE", 8),
+            breaker_failures=_env_int("BDRAG_BREAKER_FAILURES", 3),
+            breaker_cooldown_s=_env_float("BDRAG_BREAKER_COOLDOWN", 30.0) or 30.0,
+            max_body_bytes=_env_int("BDRAG_MAX_BODY", 16_384),
+            metrics_token=_env_str("BDRAG_METRICS_TOKEN", ""),
         )
 
 
-class RequestContext(BaseHTTPMiddleware):
-    """Request id, timing, metrics, security headers, structured logs, JSON 500."""
+def route_label(request: Request) -> str:
+    """The matched route's template ("/a/{answer_id}"), not the raw path: metrics
+    labelled by raw path grow a new series for every permalink and every scanner
+    probing /wp-login.php, until the scrape is too big to store."""
+    route = request.scope.get("route")
+    return getattr(route, "path", None) or "unmatched"
 
-    def __init__(self, app, metrics: Metrics, headers: dict[str, str] | None = None) -> None:
+
+class RequestContext(BaseHTTPMiddleware):
+    """Request id, body limit, timing, metrics, security headers, structured logs, JSON 500."""
+
+    def __init__(self, app, metrics: Metrics, headers: dict[str, str] | None = None,
+                 max_body_bytes: int = 0) -> None:
         super().__init__(app)
         self.metrics = metrics
         self.headers = headers or security_headers()
+        self.max_body_bytes = max_body_bytes
+
+    def too_large(self, request: Request) -> bool:
+        if not self.max_body_bytes:
+            return False
+        try:
+            return int(request.headers.get("content-length") or 0) > self.max_body_bytes
+        except ValueError:
+            return True
 
     async def dispatch(self, request: Request, call_next):
-        rid = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
+        # A caller's id is kept only if it is safe to echo into headers and logs.
+        rid = safe_request_id(request.headers.get("x-request-id")) or uuid.uuid4().hex[:12]
         request.state.request_id = rid
         request.state.trace = Trace(rid)
+        token = request_id_var.set(rid)
         start = time.perf_counter()
         try:
-            response = await call_next(request)
+            if self.too_large(request):
+                response = JSONResponse({"error": "request body too large",
+                                         "max_bytes": self.max_body_bytes}, status_code=413)
+            else:
+                response = await call_next(request)
         except Exception:
             log.exception(json.dumps({"request_id": rid, "path": request.url.path,
                                       "event": "unhandled_error"}))
-            self.metrics.inc("errors_total", path=request.url.path)
+            self.metrics.inc("errors_total", path=route_label(request))
             return JSONResponse({"error": "internal error", "request_id": rid}, status_code=500,
-                                headers=self.headers)
+                                headers={"x-request-id": rid, **self.headers})
+        finally:
+            request_id_var.reset(token)
         took = time.perf_counter() - start
-        self.metrics.inc("requests_total", path=request.url.path, status=response.status_code)
-        self.metrics.observe("request", took, path=request.url.path)
+        path = route_label(request)
+        self.metrics.inc("requests_total", path=path, status=response.status_code)
+        self.metrics.observe("request", took, path=path)
         response.headers.update({"x-request-id": rid, **self.headers})
-        log.info(json.dumps({"request_id": rid, "path": request.url.path,
+        log.info(json.dumps({"request_id": rid, "method": request.method,
+                             "path": request.url.path, "route": path,
                              "status": response.status_code, "ms": round(took * 1000)}))
         return response
 
@@ -319,7 +371,10 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
     recent: dict[str, dict] = {}             # permalinks: id -> answer payload
     state: dict = {"pipeline": pipeline, "llm": llm, "stream_llm": stream_llm,
                    "records": records, "agent": None, "ready": pipeline is not None,
-                   "fingerprint": index_fingerprint(cfg.index)}
+                   "fingerprint": index_fingerprint(cfg.index), "load_error": None}
+    admission = Admission(cfg.max_inflight, cfg.max_queue)
+    breaker = CircuitBreaker(cfg.breaker_failures, cfg.breaker_cooldown_s)
+    flights = SingleFlight()
 
     build_lock = threading.Lock()
 
@@ -332,7 +387,12 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         with build_lock:
             if state["ready"]:
                 return
-            _build()
+            try:
+                _build()
+            except Exception as e:
+                state["load_error"] = f"{type(e).__name__}: {e}"
+                raise
+            state["load_error"] = None
 
     def _build() -> None:
         from rag.embed import embedder_for
@@ -457,17 +517,42 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
             daily["n"] += 1
         return None
 
-    async def degraded_retrieval(question: str, k: int):
-        hits = await run_in_threadpool(lambda: state["pipeline"].search(question, k=k))
-        return JSONResponse({
+    def degraded_payload(question: str, hits, error: str) -> dict:
+        return {
             "question": question,
             "answer": None,
             "degraded": True,
-            "error": "the answering model is not configured; showing retrieved provisions",
+            "error": error,
             "sources": [{"n": n, "citation": h.citation, "url": h.metadata.get("url"),
                          "text": h.body[:800]} for n, h in enumerate(hits, 1)],
             "disclaimer": "Informational only — not legal advice.",
-        }, status_code=503)
+        }
+
+    async def degraded_retrieval(question: str, k: int,
+                                 error: str = "the answering model is not configured; "
+                                              "showing retrieved provisions",
+                                 retry_after_s: float | None = None):
+        hits = await run_in_threadpool(lambda: state["pipeline"].search(question, k=k))
+        headers = {"retry-after": str(int(retry_after_s) + 1)} if retry_after_s else None
+        return JSONResponse(degraded_payload(question, hits, error), status_code=503,
+                            headers=headers)
+
+    async def model_unavailable(question: str, k: int, breaker_mode: str | None):
+        """None when the model may be called; otherwise the retrieval-only reply for an
+        open circuit or a full queue. A refused request hands back any breaker trial."""
+        if breaker_mode is None:
+            metrics.inc("circuit_open_total")
+            return await degraded_retrieval(
+                question, k, "the answering model failed several times in a row and is "
+                "paused; showing retrieved provisions", breaker.retry_after())
+        if admission.full():
+            if breaker_mode == "trial":
+                breaker.release_trial()
+            metrics.inc("shed_total")
+            return await degraded_retrieval(
+                question, k, "too many questions are being answered right now; showing "
+                "retrieved provisions", admission.retry_after_s)
+        return None
 
     # ----------------------------------------------------------- endpoints
     def llm_reachable() -> bool | None:
@@ -499,6 +584,21 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
                              "llm_model": cfg.llm_model or None,
                              "llm_reachable": await run_in_threadpool(llm_reachable)})
 
+    async def livez(request: Request):
+        return JSONResponse({"status": "alive"})
+
+    async def readyz(request: Request):
+        """For a load balancer or orchestrator: route traffic here only once loading
+        is done. Never starts the load itself (startup preload does that), so a probe
+        cannot pile up behind a minute-long model load."""
+        if state["ready"]:
+            return JSONResponse({"status": "ready", "index_fingerprint": state["fingerprint"],
+                                 "circuit": breaker.state})
+        body = {"status": "loading"}
+        if state["load_error"]:
+            body = {"status": "failed", "error": state["load_error"]}
+        return JSONResponse(body, status_code=503)
+
     async def stats(request: Request):
         await run_in_threadpool(build)
         snap = metrics.snapshot()
@@ -511,12 +611,27 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
                        "retrieval": cfg.retrieval.to_dict()},
             "index_fingerprint": state["fingerprint"],
             "cache": answers.stats(),
+            "admission": admission.stats(),
+            "circuit": {"state": breaker.state, "trips": breaker.trips,
+                        "consecutive_failures": breaker.failures},
+            "singleflight_shared": flights.shared,
             "cost": {"total_usd": round(spend, 4), "per_query_usd": round(per_query, 5),
                      "projected_monthly_usd_at_200_per_day": round(project_monthly(per_query), 2)},
             "metrics": snap,
         })
 
     async def metrics_endpoint(request: Request):
+        if cfg.metrics_token:
+            import hmac
+
+            given = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+            if not hmac.compare_digest(given.encode(), cfg.metrics_token.encode()):
+                return JSONResponse({"error": "unauthorized"}, status_code=401)
+        live = admission.stats()
+        metrics.set_gauge("inflight_answers", live["inflight"])
+        metrics.set_gauge("queued_answers", live["waiting"])
+        metrics.set_gauge("circuit_open", 0 if breaker.state == CircuitBreaker.CLOSED else 1)
+        metrics.set_gauge("ready", 1 if state["ready"] else 0)
         return PlainTextResponse(metrics.prometheus(), media_type="text/plain; version=0.0.4")
 
     async def search(request: Request):
@@ -610,6 +725,9 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         if (hit := answers.get(key)) is not None:
             metrics.inc("cache_hits_total")
             return JSONResponse({**hit, "cached": True})
+        breaker_mode = breaker.allow()
+        if (unavailable := await model_unavailable(question, k, breaker_mode)) is not None:
+            return unavailable
 
         def work():
             if use_agent:
@@ -621,10 +739,33 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
             return answer_question(question, state["pipeline"], llm, k=k,
                                    guard=guard(), language=body.get("language"))
 
+        def guarded():
+            """One answer per distinct question at a time (single-flight), inside an
+            admission slot, with the outcome reported to the circuit breaker."""
+            def run():
+                with admission.slot():
+                    try:
+                        result = work()
+                    except LLMError:
+                        breaker.failure()
+                        raise
+                breaker.success()
+                return result
+            try:
+                return flights.do(key, run)
+            finally:
+                if breaker_mode == "trial":
+                    breaker.release_trial()
+
         t0 = time.perf_counter()
         try:
             with trace.span("answer", agent=use_agent, k=k):
-                ans = await run_in_threadpool(work)
+                ans, shared = await run_in_threadpool(guarded)
+        except Busy as e:
+            metrics.inc("shed_total")
+            return await degraded_retrieval(
+                question, k, "too many questions are being answered right now; showing "
+                "retrieved provisions", e.retry_after_s)
         except LLMError as e:
             # Graceful degradation: the model is down, retrieval is not. Give the
             # user the provisions we found and say plainly what is missing.
@@ -643,11 +784,14 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         metrics.observe("answer", time.perf_counter() - t0, agent=str(use_agent))
         metrics.inc("answers_total", agent=str(use_agent),
                     outcome="refused" if ans.refused else "answered")
-        if ans.repaired:
-            metrics.inc("repairs_total")
-        if ans.failures:
-            metrics.inc("guardrail_failures_total")
-        record_cost(ans)
+        if shared:
+            metrics.inc("singleflight_shared_total")
+        else:
+            if ans.repaired:
+                metrics.inc("repairs_total")
+            if ans.failures:
+                metrics.inc("guardrail_failures_total")
+            record_cost(ans)
 
         answer_id = uuid.uuid4().hex[:10]
         out = serialize(ans, answer_id=answer_id)
@@ -675,57 +819,89 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         if (picked := pick_model(body)) is None:
             return JSONResponse({"error": "unknown model; GET /models lists the choices"},
                                 status_code=400)
-        llm, stream_llm, _ = picked
+        llm, stream_llm, model_id = picked
         if getattr(stream_llm, "offline_stub", False):
             return await degraded_retrieval(question, k)
 
         def sse(event: str, data: dict) -> str:
             return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
-        def events():
+        headers = {"cache-control": "no-cache", "x-accel-buffering": "no"}
+        # Same key as a non-agent /ask, so either endpoint can serve the other's answer.
+        key = cache_key(question, k=k, agent=False, language=body.get("language"),
+                        model=model_id, fingerprint=state["fingerprint"],
+                        retrieval=cfg.retrieval.to_dict(), min_score=cfg.min_score)
+        if (hit := answers.get(key)) is not None:
+            metrics.inc("cache_hits_total")
+            cached = {**hit, "cached": True}
+            return StreamingResponse(iter([sse("final", cached)]),
+                                     media_type="text/event-stream", headers=headers)
+        breaker_mode = breaker.allow()
+        if (unavailable := await model_unavailable(question, k, breaker_mode)) is not None:
+            return unavailable
+
+        def degraded_event(error: str) -> str:
             try:
-                for item in answer_question_stream(
-                        question, state["pipeline"], stream_llm, k=k, guard=guard(),
-                        repair_llm=llm, language=body.get("language")):
-                    kind = item["type"]
-                    if kind == "final":
-                        ans = item["answer"]
-                        metrics.inc("answers_total", agent="False",
-                                    outcome="refused" if ans.refused else "answered")
-                        record_cost(ans)
-                        answer_id = uuid.uuid4().hex[:10]
-                        out = serialize(ans, answer_id=answer_id)
-                        if cfg.verify_live and not ans.refused:
-                            live_statuses(ans, out)
-                        remember(answer_id, out, ans, client, False)
-                        yield sse("final", out)
-                    else:
-                        yield sse(kind, {k2: v for k2, v in item.items() if k2 != "type"})
+                hits = state["pipeline"].search(question, k=k)
+            except Exception:
+                hits = []
+            return sse("final", degraded_payload(question, hits, error))
+
+        def events():
+            t0 = time.perf_counter()
+            first_token = True
+            try:
+                with admission.slot():
+                    for item in answer_question_stream(
+                            question, state["pipeline"], stream_llm, k=k, guard=guard(),
+                            repair_llm=llm, language=body.get("language")):
+                        kind = item["type"]
+                        if kind == "token" and first_token:
+                            first_token = False
+                            metrics.observe("ttft", time.perf_counter() - t0)
+                        if kind == "final":
+                            ans = item["answer"]
+                            breaker.success()
+                            metrics.observe("answer", time.perf_counter() - t0, agent="False")
+                            metrics.inc("answers_total", agent="False",
+                                        outcome="refused" if ans.refused else "answered")
+                            record_cost(ans)
+                            answer_id = uuid.uuid4().hex[:10]
+                            out = serialize(ans, answer_id=answer_id)
+                            if cfg.verify_live and not ans.refused:
+                                live_statuses(ans, out)
+                            answers.put(key, out)
+                            remember(answer_id, out, ans, client, False)
+                            yield sse("final", out)
+                        else:
+                            yield sse(kind, {k2: v for k2, v in item.items() if k2 != "type"})
+            except Busy:
+                # Lost the race for the last queue place after the check above.
+                metrics.inc("shed_total")
+                yield degraded_event("too many questions are being answered right now; "
+                                     "showing retrieved provisions")
             except LLMError as e:
                 # Same degradation as /ask: the model failed, retrieval did not.
                 log.warning("answering model failed during stream: %s", e)
+                breaker.failure()
                 metrics.inc("degraded_total")
-                try:
-                    hits = state["pipeline"].search(question, k=k)
-                except Exception:
-                    hits = []
-                yield sse("final", {
-                    "question": question, "answer": None, "degraded": True,
-                    "error": f"the answering model is unavailable ({e})",
-                    "sources": [{"n": n, "citation": h.citation, "url": h.metadata.get("url"),
-                                 "text": h.body[:800]} for n, h in enumerate(hits, 1)],
-                    "disclaimer": "Informational only — not legal advice."})
+                yield degraded_event(f"the answering model is unavailable ({e})")
             except Exception as e:            # a dropped stream must not hang the client
                 log.exception("stream failed")
                 yield sse("error", {"error": f"{type(e).__name__}: {e}"})
+            finally:
+                if breaker_mode == "trial":
+                    breaker.release_trial()
 
-        return StreamingResponse(events(), media_type="text/event-stream",
-                                 headers={"cache-control": "no-cache", "x-accel-buffering": "no"})
+        return StreamingResponse(events(), media_type="text/event-stream", headers=headers)
 
     async def feedback(request: Request):
         """Thumbs up/down on an answer. This is tomorrow's evaluation set."""
+        blocked, _ = gate(request)          # every row is a disk write: rate limit it
+        if blocked is not None:
+            return blocked
         body = await payload(request)
-        answer_id = (body.get("id") or "").strip()
+        answer_id = str(body.get("id") or "").strip()[:32]
         rating = body.get("rating")
         if rating not in ("up", "down"):
             return JSONResponse({"error": "rating must be 'up' or 'down'"}, status_code=400)
@@ -761,6 +937,8 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
     routes: list[Route | Mount] = [
         Route("/", index_page),
         Route("/health", health),
+        Route("/livez", livez),
+        Route("/readyz", readyz),
         Route("/stats", stats),
         Route("/models", models),
         Route("/metrics", metrics_endpoint),
@@ -774,7 +952,8 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         routes.append(Mount("/static", StaticFiles(directory=str(STATIC)), name="static"))
 
     middleware = [
-        Middleware(RequestContext, metrics=metrics, headers=security_headers(cfg.frame_ancestors)),
+        Middleware(RequestContext, metrics=metrics, headers=security_headers(cfg.frame_ancestors),
+                   max_body_bytes=cfg.max_body_bytes),
         Middleware(CORSMiddleware, allow_origins=cfg.cors_origins, allow_methods=["*"],
                    allow_headers=["*"]),
     ]
@@ -801,6 +980,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
     app.state.config, app.state.metrics, app.state.cache = cfg, metrics, answers
     app.state.components, app.state.recent = state, recent
     app.state.build = build
+    app.state.admission, app.state.breaker, app.state.flights = admission, breaker, flights
     return app
 
 
@@ -808,6 +988,7 @@ app = None  # built on demand by `uvicorn service.app:get_app --factory`
 
 
 def get_app() -> Starlette:
-    logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"),
-                        format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    from service.logs import configure
+
+    configure(os.environ.get("LOG_LEVEL", "INFO"), os.environ.get("LOG_FORMAT", "text"))
     return create_app()
