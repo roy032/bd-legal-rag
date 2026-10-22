@@ -134,6 +134,17 @@ placeholder. `pii_redacted_total{kind}` counts them. Section numbers, years and 
 are not touched; `bdrag redteam` checks both directions on 52 probes in Bangla, English
 and romanised Bangla, and runs in CI.
 
+### Shared answers
+
+A shared link (`/a/<id>`) reads the answer from `BDRAG_ANSWERS_DB`
+(`data/answers.sqlite3`), so links survive restarts and deploys and work on every replica
+that mounts the same file. Answers are deleted after `BDRAG_ANSWER_DAYS` (90) days: they
+quote the law as it stood that day, and the page says which day. Shared pages carry
+`noindex`, so search engines do not publish what a visitor asked. If the file cannot be
+opened the service logs it once and keeps links in memory; `/stats` reports
+`shared_answers.durable`. On a Hugging Face Space the disk is wiped on restart unless the
+Space has persistent storage; point the variable at `/data/answers.sqlite3` there.
+
 ## Container hardening
 
 The image runs as a non-root user. Run it with a read-only root filesystem, no Linux
@@ -145,6 +156,7 @@ docker run --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privile
   -v "$PWD/data/index:/app/data/index:ro" \
   -v bdrag-logs:/app/data/logs -e BDRAG_FEEDBACK=/app/data/logs/feedback.jsonl \
   -e BDRAG_ANALYTICS=/app/data/logs/queries.jsonl \
+  -e BDRAG_ANSWERS_DB=/app/data/logs/answers.sqlite3 \
   -v bdrag-hf:/app/.cache/huggingface -p 8000:8000 bd-legal-rag
 ```
 

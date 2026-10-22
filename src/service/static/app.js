@@ -50,6 +50,7 @@ const T = {
     amended: "amended", repealed: "repealed act", current: "✓ matches the site today", changed: "⚠ changed on the site since indexing",
     repaired: "re-checked once", cached: "instant (cached)", similar: "Answered earlier for a very similar question.",
     similar2: q => `It was: “${q}”. If that is not what you asked, add detail and ask again.`, conf: "confidence", seconds: s => `${s}s`,
+    answered_on: d => `Answered on ${d}; the law may have changed since.`,
     confl: {high: "high", medium: "medium", low: "low"},
     fail: {uncited_sentences: "some sentences lack a citation", invalid_citations: "cites a missing excerpt",
            unsupported_claims: "a claim may not be in the excerpts", fabricated_quotes: "a quote is not verbatim",
@@ -96,6 +97,7 @@ const T = {
     amended: "সংশোধিত", repealed: "রহিত আইন", current: "✓ সাইটের বর্তমান পাঠের সঙ্গে মেলে", changed: "⚠ সূচিভুক্তির পর সাইটে বদলেছে",
     repaired: "একবার পুনর্যাচাই", cached: "তাৎক্ষণিক (ক্যাশ)", similar: "খুব কাছাকাছি একটি আগের প্রশ্নের উত্তর দেখানো হচ্ছে।",
     similar2: q => `আগের প্রশ্ন: “${q}”। আপনার প্রশ্নের সঙ্গে না মিললে আরও বিস্তারিত লিখে আবার জিজ্ঞেস করুন।`, conf: "আস্থা", seconds: s => `${toBn(s)} সেকেন্ড`,
+    answered_on: d => `উত্তর দেওয়া হয়েছিল ${d}; এরপর আইন বদলে থাকতে পারে।`,
     confl: {high: "উচ্চ", medium: "মাঝারি", low: "নিম্ন"},
     fail: {uncited_sentences: "কিছু বাক্যে উৎস নেই", invalid_citations: "অনুপস্থিত অংশের উল্লেখ",
            unsupported_claims: "কোনো দাবি অংশে না-ও থাকতে পারে", fabricated_quotes: "উদ্ধৃতি হুবহু নয়",
@@ -408,7 +410,13 @@ function render(d, opts = {}) {
   $("badges").innerHTML = "";
   if (d.repaired) badge(t("repaired"), "warn");
   (d.failures || []).forEach(f => badge(t("fail")[f] || f.replace(/_/g, " "), "bad"));
-  if (d.cached) badge(t("cached"));
+  if (d.cached && !opts.fromPermalink) badge(t("cached"));
+  if (opts.fromPermalink && d.created) {
+    // A shared answer quotes the law as it stood that day: say which day.
+    const day = new Date(d.created * 1000).toLocaleDateString(LANG === "bn" ? "bn-BD" : "en-GB",
+      {year: "numeric", month: "long", day: "numeric"});
+    badge(t("answered_on", day), "warn");
+  }
   if (d.stop_reason) badge(t("agent", d.stop_reason, (d.trace || []).length));
   if (d.latency_s && !d.cached) badge(t("seconds", Math.round(d.latency_s * 10) / 10));
   if (d.confidence) {

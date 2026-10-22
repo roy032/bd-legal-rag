@@ -31,9 +31,11 @@ Three things here that are easy to get wrong and expensive to get wrong:
 """
 from __future__ import annotations
 
+import html
 import json
 import logging
 import os
+import re
 import threading
 import time
 import uuid
@@ -47,7 +49,13 @@ from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
-from starlette.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
+from starlette.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    StreamingResponse,
+)
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
@@ -58,6 +66,7 @@ from rag.llm import LLMError
 from rag.pii import redact
 from rag.pipeline import RetrievalConfig, index_fingerprint
 from rag.topics import match_topics
+from service.answers import AnswerStore
 from service.backends import make_cache, make_limiter
 from service.cache import cache_key
 from service.cost import estimate_cost, project_monthly
@@ -155,6 +164,10 @@ class ServiceConfig:
     # built in a test never appends to the real data/queries.jsonl.
     feedback_path: str = ""
     analytics_path: str = ""
+    # Shared answers (/a/<id>): a SQLite file so links survive restarts and deploys;
+    # empty = memory only. Kept this many days, then deleted; 0 = forever.
+    answers_path: str = ""
+    answer_days: float = 90
     cors_origins: list[str] = field(default_factory=lambda: ["*"])
     trust_proxy: bool = False
     verify_live: bool = False        # re-check cited sections against bdlaws (rag/verify.py)
@@ -232,6 +245,8 @@ class ServiceConfig:
             general_fallback=_env_bool("BDRAG_GENERAL_FALLBACK", True),
             feedback_path=_env_str("BDRAG_FEEDBACK", "data/feedback.jsonl"),
             analytics_path=_env_str("BDRAG_ANALYTICS", "data/queries.jsonl"),
+            answers_path=_env_str("BDRAG_ANSWERS_DB", "data/answers.sqlite3"),
+            answer_days=_env_float("BDRAG_ANSWER_DAYS", 90.0) or 0.0,
             cors_origins=[o.strip() for o in _env_str("BDRAG_CORS", "*").split(",") if o.strip()],
             trust_proxy=_env_bool("BDRAG_TRUST_PROXY", False),
             verify_live=_env_bool("BDRAG_VERIFY_LIVE", False),
@@ -248,6 +263,37 @@ class ServiceConfig:
             semantic_cache=_env_str("BDRAG_SEMANTIC_CACHE", "auto"),
             semantic_overlap=_env_float("BDRAG_SEMANTIC_OVERLAP", 0.6) or 0.0,
         )
+
+
+def _clip(text: object, n: int) -> str:
+    text = " ".join(str(text or "").split())
+    return text if len(text) <= n else text[:n - 1].rstrip() + "…"
+
+
+def share_page(stored: dict | None) -> str:
+    """index.html with a shared answer's question as the title and its opening as the
+    link-preview description. Shared answers are marked noindex: they hold what a
+    visitor asked, which is theirs to pass on, not a search engine's to publish."""
+    page = (STATIC / "index.html").read_text(encoding="utf-8")
+    robots = '<meta name="robots" content="noindex">\n'
+    if not stored:
+        return page.replace("</head>", robots + "</head>", 1)
+    title = html.escape(_clip(stored.get("question"), 90) + " · Bangladesh Law Assistant",
+                        quote=True)
+    desc = html.escape(_clip(re.sub(r"\[\d+\]|[*#_`>]", "", stored.get("answer") or "")
+                             or "Cited answer about Bangladeshi law.", 200), quote=True)
+    # Functions, not replacement strings: a backslash in a question is not a group.
+    page = re.sub(r"<title>.*?</title>", lambda _: f"<title>{title}</title>", page,
+                  count=1, flags=re.S)
+    def fill(attr: str, value: str) -> None:
+        nonlocal page
+        page = re.sub(rf'(<meta {attr} content=")[^"]*', lambda m: m.group(1) + value, page,
+                      count=1)
+
+    fill('property="og:title"', title)
+    fill('property="og:description"', desc)
+    fill('name="description"', desc)
+    return page.replace("</head>", robots + "</head>", 1)
 
 
 def route_label(request: Request) -> str:
@@ -383,7 +429,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
     metrics = Metrics()
     answers = make_cache(cfg.cache_ttl_s, cfg.cache_size)
     limiter = make_limiter(cfg.rate_per_min, cfg.burst)
-    recent: dict[str, dict] = {}             # permalinks: id -> answer payload
+    recent = AnswerStore(cfg.answers_path, cfg.answer_days)     # permalinks: id -> payload
     state: dict = {"pipeline": pipeline, "llm": llm, "stream_llm": stream_llm,
                    "records": records, "agent": None, "ready": pipeline is not None,
                    "fingerprint": index_fingerprint(cfg.index), "load_error": None}
@@ -489,9 +535,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
     def remember(answer_id: str, out: dict, ans, client, use_agent: bool) -> None:
         """Permalink store (bounded) + one analytics row per answer, for both
         the plain and the streaming endpoint."""
-        recent[answer_id] = out
-        while len(recent) > 500:
-            recent.pop(next(iter(recent)))
+        recent.put(answer_id, out)
         _append_jsonl(cfg.analytics_path, {
             "ts": time.time(), "id": answer_id, "client": client, "question": ans.question,
             "agent": use_agent, "refused": ans.refused, "failures": ans.failures,
@@ -684,6 +728,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
             "circuit": {"state": breaker.state, "trips": breaker.trips,
                         "consecutive_failures": breaker.failures},
             "singleflight_shared": flights.shared,
+            "shared_answers": {"stored": len(recent), "durable": recent.durable},
             "cost": {"total_usd": round(spend, 4), "per_query_usd": round(per_query, 5),
                      "projected_monthly_usd_at_200_per_day": round(project_monthly(per_query), 2)},
             "metrics": snap,
@@ -728,7 +773,8 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
 
     def serialize(ans, cached: bool = False, answer_id: str | None = None) -> dict:
         return {
-            "id": answer_id, "question": ans.question, "answer": ans.text,
+            "id": answer_id, "created": int(time.time()),
+            "question": ans.question, "answer": ans.text,
             "refused": ans.refused, "abstained": ans.abstained, "repaired": ans.repaired,
             # Not grounded in the indexed laws: label it and replace any streamed draft.
             "general_guidance": ans.general,
@@ -984,7 +1030,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         rating = body.get("rating")
         if rating not in ("up", "down"):
             return JSONResponse({"error": "rating must be 'up' or 'down'"}, status_code=400)
-        stored = recent.get(answer_id, {})
+        stored = recent.get(answer_id) or {}
         comment = str(body.get("comment") or "")
         if cfg.redact_pii:
             comment = redact(comment)[0]
@@ -1005,10 +1051,12 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         # from the cached page, whatever Accept header the fetch sends.
         accept = request.headers.get("accept", "")
         vary = {"vary": "accept"}
+        stored = recent.get(request.path_params["answer_id"])
         if (request.query_params.get("format") != "json"
                 and "text/html" in accept and "application/json" not in accept):
-            return FileResponse(STATIC / "index.html", headers=vary)
-        stored = recent.get(request.path_params["answer_id"])
+            # The page with this answer's question in the title and the link preview,
+            # so a link pasted into Messenger or WhatsApp says what it is about.
+            return HTMLResponse(share_page(stored), headers=vary)
         if not stored:
             return JSONResponse({"error": "not found or expired"}, status_code=404, headers=vary)
         return JSONResponse(stored, headers=vary)

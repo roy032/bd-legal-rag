@@ -5,6 +5,14 @@ open is in [IMPROVEMENTS.md](IMPROVEMENTS.md).
 
 ## Unreleased
 
+### Shared links that last
+- Shared answers are stored in SQLite (`BDRAG_ANSWERS_DB`, default
+  `data/answers.sqlite3`) instead of a 500-entry dict in memory, so a link pasted into a
+  chat still works after a restart, a deploy, or 500 newer answers. Deleted after
+  `BDRAG_ANSWER_DAYS` (90). Falls back to memory if the file cannot be opened.
+- A shared link's page carries the question as its title and the answer's opening as
+  the link-preview text, and `noindex`. The page shows the date the answer was given.
+
 ### Faster repeat questions
 - Paraphrase cache (`BDRAG_SEMANTIC_CACHE`, `auto` by default): a reworded question gets
   the earlier answer in milliseconds instead of a new 20 to 115 second answer. Gated on
