@@ -32,6 +32,7 @@ Three things here that are easy to get wrong and expensive to get wrong:
 """
 from __future__ import annotations
 
+import hashlib
 import html
 import json
 import logging
@@ -534,12 +535,20 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
                                                     guard=guard(), seed=True))
         return state["agent"]
 
+    salt = os.urandom(16)
+
+    def pseudonym(client: str | None) -> str:
+        """The query log counts repeat visitors without holding their IP address: a
+        salted hash, with a salt that lives only as long as the process."""
+        return hashlib.sha256(salt + str(client).encode()).hexdigest()[:12]
+
     def remember(answer_id: str, out: dict, ans, client, use_agent: bool) -> None:
         """Permalink store (bounded) + one analytics row per answer, for both
         the plain and the streaming endpoint."""
         recent.put(answer_id, out)
         _append_jsonl(cfg.analytics_path, {
-            "ts": time.time(), "id": answer_id, "client": client, "question": ans.question,
+            "ts": time.time(), "id": answer_id, "client": pseudonym(client),
+            "question": ans.question,
             "agent": use_agent, "refused": ans.refused, "failures": ans.failures,
             "sources": [s["chunk_id"] for s in ans.sources], "latency_s": round(ans.latency_s, 2)})
 
@@ -1117,8 +1126,33 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
     async def index_page(request: Request):
         return FileResponse(STATIC / "index.html")
 
+    async def privacy_page(request: Request):
+        return FileResponse(STATIC / "privacy.html")
+
+    async def robots(request: Request):
+        # Shared answers hold what visitors asked; the API is not content.
+        return PlainTextResponse("User-agent: *\nAllow: /$\nAllow: /privacy\nAllow: /static/\n"
+                                 "Disallow: /a/\nDisallow: /ask\nDisallow: /search\n"
+                                 "Disallow: /metrics\nDisallow: /stats\n")
+
+    async def manifest(request: Request):
+        # Lets a phone add the app to its home screen with its own icon and colours.
+        return JSONResponse({
+            "name": "Bangladesh Law Assistant · বাংলাদেশ আইন সহায়ক",
+            "short_name": "আইন সহায়ক", "start_url": "/", "scope": "/", "display": "standalone",
+            "lang": "bn", "background_color": "#f6f4ef", "theme_color": "#0b4f3a",
+            "description": "Free answers about Bangladeshi law in Bangla or English, "
+                           "cited to the section of the Act.",
+            "icons": [{"src": "/static/favicon.svg", "sizes": "any", "type": "image/svg+xml",
+                       "purpose": "any"}],
+        }, media_type="application/manifest+json")
+
     routes: list[Route | Mount] = [
         Route("/", index_page),
+        Route("/privacy", privacy_page),
+        Route("/terms", privacy_page),
+        Route("/robots.txt", robots),
+        Route("/manifest.webmanifest", manifest),
         Route("/health", health),
         Route("/livez", livez),
         Route("/readyz", readyz),

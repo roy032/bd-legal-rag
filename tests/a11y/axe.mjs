@@ -54,6 +54,8 @@ try {
     await page.keyboard.press("Escape");
     await ask(page, lang === "bn" ? "হত্যার শাস্তি কী?" : "What is the punishment for murder?");
     await audit(page, `answer ${lang} ${theme}`);
+    await page.goto(BASE + "/privacy");
+    await audit(page, `privacy ${lang} ${theme}`);
     await context.close();
   }
 
