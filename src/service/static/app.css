@@ -265,8 +265,8 @@ body.answered section.examples { display: none; }
 .src { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; box-shadow: var(--shadow-sm); transition: border-color .15s; }
 .src:hover { border-color: var(--line-2); }
 .src[open] { border-color: var(--accent-line); }
-.src.uncited { opacity: .72; }
-.src.uncited:hover, .src.uncited[open] { opacity: 1; }
+/* Not dimmed with opacity: that took the small text below the WCAG AA contrast ratio. */
+.src.uncited { border-style: dashed; box-shadow: none; }
 .src summary { list-style: none; cursor: pointer; padding: 12px 14px; display: flex; gap: 12px; align-items: flex-start; }
 .src summary::-webkit-details-marker { display: none; }
 .src .num { flex: none; min-width: 26px; height: 26px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent-line);

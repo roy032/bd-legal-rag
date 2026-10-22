@@ -55,6 +55,11 @@ const T = {
            language_mismatch: "answered in the other language"},
     thanks: "Thanks, noted.", whatwrong: "What was wrong? (optional)", copied: "Copied.", linkcopied: "Link copied.",
     step: n => `step ${n}`, excerptsplus: n => ` → +${n} excerpts`, agent: (r, n) => `deeper search: ${r} · ${n} steps`,
+    // Labels a screen reader announces; they follow the page language like the text.
+    skip: "Skip to the question box", l_home: "Bangladesh Law Assistant, home", l_lang: "Language",
+    l_theme: "Switch colour theme", l_tabs: "Example questions by area of law", l_progress: "Progress",
+    l_helpful: "Helpful", l_nothelpful: "Not helpful", l_aid: "Free legal aid", l_feedback: "Feedback",
+    commentlabel: "What was wrong with this answer?", l_source: n => `Source ${n}`,
   },
   bn: {
     brand: "বাংলাদেশ আইন সহায়ক", brand2: "Bangladesh Law Assistant",
@@ -95,6 +100,10 @@ const T = {
            language_mismatch: "অন্য ভাষায় উত্তর"},
     thanks: "ধন্যবাদ, জানানো হলো।", whatwrong: "কী ভুল ছিল? (ঐচ্ছিক)", copied: "কপি হয়েছে।", linkcopied: "লিংক কপি হয়েছে।",
     step: n => `ধাপ ${toBn(n)}`, excerptsplus: n => ` → +${toBn(n)}টি অংশ`, agent: (r, n) => `গভীর অনুসন্ধান: ${r} · ${toBn(n)} ধাপ`,
+    skip: "প্রশ্নের ঘরে যান", l_home: "বাংলাদেশ আইন সহায়ক, প্রথম পাতা", l_lang: "ভাষা",
+    l_theme: "রঙের থিম বদলান", l_tabs: "আইনের বিষয় অনুযায়ী উদাহরণ প্রশ্ন", l_progress: "অগ্রগতি",
+    l_helpful: "সহায়ক", l_nothelpful: "সহায়ক নয়", l_aid: "বিনামূল্যে আইনি সহায়তা", l_feedback: "মতামত",
+    commentlabel: "এই উত্তরে কী ভুল ছিল?", l_source: n => `সূত্র ${toBn(n)}`,
   },
 };
 let LANG = document.documentElement.lang === "bn" ? "bn" : "en";
@@ -134,6 +143,7 @@ function applyLang(lang) {
     if (key === "trust1" && CORPUS) el.textContent = t("trust1n", CORPUS);
     else el.textContent = t(key);
   });
+  document.querySelectorAll("[data-i18n-label]").forEach(el => el.setAttribute("aria-label", t(el.dataset.i18nLabel)));
   $("q").placeholder = t(document.body.classList.contains("answered") ? "placeholder2" : "placeholder");
   document.querySelectorAll(".seg [data-lang]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.lang === LANG)));
   renderTabs();
@@ -142,23 +152,37 @@ function applyLang(lang) {
 }
 document.querySelectorAll(".seg [data-lang]").forEach(b => { b.onclick = () => applyLang(b.dataset.lang); });
 
+const isDark = () => document.documentElement.dataset.theme
+  ? document.documentElement.dataset.theme === "dark"
+  : matchMedia("(prefers-color-scheme: dark)").matches;
+$("theme").setAttribute("aria-pressed", String(isDark()));
 $("theme").onclick = () => {
-  const dark = document.documentElement.dataset.theme
-    ? document.documentElement.dataset.theme === "dark"
-    : matchMedia("(prefers-color-scheme: dark)").matches;
-  document.documentElement.dataset.theme = dark ? "light" : "dark";
+  document.documentElement.dataset.theme = isDark() ? "light" : "dark";
   store.set("bdrag-theme", document.documentElement.dataset.theme);
+  $("theme").setAttribute("aria-pressed", String(isDark()));
 };
 
 // ------------------------------------------------------------------ examples
 let TAB = 0;
 function renderTabs() {
+  // One tab stop for the whole list; arrow keys move between tabs (WAI-ARIA tabs pattern).
   $("tabs").innerHTML = EXAMPLES.map((g, i) =>
-    `<button type="button" class="tab" role="tab" aria-selected="${i === TAB}" data-i="${i}"><span class="ico" aria-hidden="true">${g.ico}</span>${esc(g.area[LANG])}</button>`).join("");
+    `<button type="button" class="tab" role="tab" id="tab-${i}" aria-controls="exlist" aria-selected="${i === TAB}" tabindex="${i === TAB ? 0 : -1}" data-i="${i}"><span class="ico" aria-hidden="true">${g.ico}</span>${esc(g.area[LANG])}</button>`).join("");
+  $("exlist").setAttribute("aria-labelledby", "tab-" + TAB);
   $("exlist").innerHTML = EXAMPLES[TAB].qs.map(q =>
     `<button type="button" class="ex" data-q="${esc(q)}">${esc(q)}</button>`).join("");
 }
 $("tabs").onclick = e => { const b = e.target.closest("[data-i]"); if (b) { TAB = +b.dataset.i; renderTabs(); } };
+$("tabs").addEventListener("keydown", e => {
+  const moves = {ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1};
+  let next = null;
+  if (e.key in moves) next = (TAB + moves[e.key] + EXAMPLES.length) % EXAMPLES.length;
+  else if (e.key === "Home") next = 0;
+  else if (e.key === "End") next = EXAMPLES.length - 1;
+  if (next === null) return;
+  e.preventDefault();
+  TAB = next; renderTabs(); $("tab-" + TAB).focus();
+});
 $("exlist").onclick = e => { const b = e.target.closest("[data-q]"); if (b) { $("q").value = b.dataset.q; grow(); submit(); } };
 
 // ------------------------------------------------------------------ ask box
@@ -231,7 +255,7 @@ function inline(s, bn) {
     .replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s.,;:)।]|$)/g, "$1<em>$2</em>")
     .replace(/\[([0-9০-৯]{1,2})\]/g, (_, n) => {
       const num = String(n).replace(/[০-৯]/g, d => BN_DIGITS.indexOf(d));
-      return `<button type="button" class="cite" data-n="${num}" aria-label="source ${num}">${bn ? toBn(num) : num}</button>`;
+      return `<button type="button" class="cite" data-n="${num}" aria-label="${esc(t("l_source", num))}">${bn ? toBn(num) : num}</button>`;
     });
 }
 
@@ -315,9 +339,11 @@ function renderSources(cited = null) {
   }).join("");
 }
 
-function openSource(n) {
+function openSource(n, focus = false) {
   const el = $("src-" + n);
   if (!el) return;
+  // From the keyboard (Enter or Space on a citation), focus follows to the source.
+  if (focus) el.querySelector("summary").focus({preventScroll: true});
   el.open = true;
   const behavior = matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
   const col = $("srcwrap");
@@ -329,7 +355,7 @@ function openSource(n) {
   }
   el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
 }
-document.addEventListener("click", e => { const c = e.target.closest(".cite"); if (c) openSource(c.dataset.n); });
+document.addEventListener("click", e => { const c = e.target.closest(".cite"); if (c) openSource(c.dataset.n, e.detail === 0); });
 
 function badge(text, cls = "", title = "") {
   const b = document.createElement("span");
@@ -405,6 +431,8 @@ function render(d, opts = {}) {
 let controller = null;
 
 function busy(on) {
+  // A screen reader waits for the whole answer instead of reading each streamed token.
+  document.querySelector(".answercard").setAttribute("aria-busy", String(on));
   $("go").disabled = on;
   $("stop").hidden = !on;
 }

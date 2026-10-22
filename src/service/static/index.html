@@ -21,19 +21,19 @@
 </script>
 </head>
 <body>
-<a class="skip" href="#q">Skip to the question box</a>
+<a class="skip" href="#q" data-i18n="skip">Skip to the question box</a>
 <header class="top">
   <div class="wrap bar">
-    <a class="brand" href="/" aria-label="Bangladesh Law Assistant, home">
+    <a class="brand" href="/" aria-label="Bangladesh Law Assistant, home" data-i18n-label="l_home">
       <svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="#0b4f3a"/><circle cx="16" cy="16" r="8" fill="#c8102e"/><path d="M16 7v18M10 11h12M8 19l2-8 2 8a2 2 0 0 1-4 0zm12 0 2-8 2 8a2 2 0 0 1-4 0zM12 25h8" stroke="#fff" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
       <span class="brandtext"><b data-i18n="brand">Bangladesh Law Assistant</b><small data-i18n="brand2">বাংলাদেশ আইন সহায়ক</small></span>
     </a>
     <span class="spacer"></span>
-    <div class="seg" role="group" aria-label="Language / ভাষা">
+    <div class="seg" role="group" aria-label="Language / ভাষা" data-i18n-label="l_lang">
       <button type="button" data-lang="bn" aria-pressed="false">বাংলা</button>
       <button type="button" data-lang="en" aria-pressed="false">EN</button>
     </div>
-    <button type="button" class="iconbtn" id="theme" aria-label="Switch colour theme" title="Theme">
+    <button type="button" class="iconbtn" id="theme" aria-label="Switch colour theme" data-i18n-label="l_theme" aria-pressed="false" title="Theme">
       <svg class="moon" width="17" height="17" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg>
       <svg class="sun" width="17" height="17" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="currentColor"/><path stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
     </button>
@@ -82,17 +82,17 @@
 
   <section class="examples narrow" aria-labelledby="exh">
     <h2 id="exh" class="kicker" data-i18n="examples">Try a question</h2>
-    <div class="tabs" role="tablist" id="tabs"></div>
+    <div class="tabs" role="tablist" id="tabs" aria-label="Example questions by area of law" data-i18n-label="l_tabs"></div>
     <div class="exlist" id="exlist" role="tabpanel"></div>
   </section>
 
   <section id="result" hidden>
     <div class="answercol">
       <h2 class="qecho" id="qecho"></h2>
-      <article class="card answercard" aria-live="polite">
+      <article class="card answercard" aria-live="polite" aria-busy="false">
         <header class="cardhead">
           <span class="label" data-i18n="answerlabel">Answer</span>
-          <ol class="steps" id="steps" aria-label="progress"></ol>
+          <ol class="steps" id="steps" aria-label="Progress" data-i18n-label="l_progress"></ol>
           <div class="badges" id="badges"></div>
         </header>
         <div id="notice"></div>
@@ -104,10 +104,10 @@
         </div>
         <details id="tracewrap" hidden class="trace"><summary data-i18n="trace">What the deeper search did</summary><ol id="trace"></ol></details>
         <footer class="actions" id="actions" hidden>
-          <div class="fbgroup" role="group">
+          <div class="fbgroup" role="group" aria-label="Feedback" data-i18n-label="l_feedback">
             <span class="fbq" data-i18n="useful">Was this useful?</span>
-            <button type="button" class="chip" id="fbup" aria-pressed="false" aria-label="Helpful"><svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M2 21h4V9H2zm20-11a2 2 0 0 0-2-2h-6.3l1-4.6v-.3a1.5 1.5 0 0 0-.5-1L13.2 1 6.6 7.6A2 2 0 0 0 6 9v10a2 2 0 0 0 2 2h9a2 2 0 0 0 1.8-1.2l3-7.1.2-.7z"/></svg><span data-i18n="yes">Yes</span></button>
-            <button type="button" class="chip" id="fbdown" aria-pressed="false" aria-label="Not helpful"><svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M22 3h-4v12h4zM2 14a2 2 0 0 0 2 2h6.3l-1 4.6v.3c0 .4.2.8.5 1.1l1.1 1 6.6-6.6c.4-.4.5-.9.5-1.4V5a2 2 0 0 0-2-2H7a2 2 0 0 0-1.8 1.2l-3 7.1-.2.7z"/></svg><span data-i18n="no">No</span></button>
+            <button type="button" class="chip" id="fbup" aria-pressed="false" aria-label="Helpful" data-i18n-label="l_helpful"><svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M2 21h4V9H2zm20-11a2 2 0 0 0-2-2h-6.3l1-4.6v-.3a1.5 1.5 0 0 0-.5-1L13.2 1 6.6 7.6A2 2 0 0 0 6 9v10a2 2 0 0 0 2 2h9a2 2 0 0 0 1.8-1.2l3-7.1.2-.7z"/></svg><span data-i18n="yes">Yes</span></button>
+            <button type="button" class="chip" id="fbdown" aria-pressed="false" aria-label="Not helpful" data-i18n-label="l_nothelpful"><svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M22 3h-4v12h4zM2 14a2 2 0 0 0 2 2h6.3l-1 4.6v.3c0 .4.2.8.5 1.1l1.1 1 6.6-6.6c.4-.4.5-.9.5-1.4V5a2 2 0 0 0-2-2H7a2 2 0 0 0-1.8 1.2l-3 7.1-.2.7z"/></svg><span data-i18n="no">No</span></button>
           </div>
           <span class="spacer"></span>
           <button type="button" class="chip" id="copytext"><svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16 1H4a2 2 0 0 0-2 2v14h2V3h12zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11z"/></svg><span data-i18n="copy">Copy</span></button>
@@ -116,6 +116,7 @@
           <span class="msg" id="fbmsg" aria-live="polite"></span>
         </footer>
         <form class="fbform" id="fbform" hidden>
+          <label for="fbcomment" class="sr" data-i18n="commentlabel">What was wrong with this answer?</label>
           <input id="fbcomment" maxlength="1000">
           <button type="submit" class="chip" data-i18n="send">Send</button>
         </form>
@@ -128,7 +129,7 @@
     </aside>
   </section>
 
-  <aside class="aid narrow" aria-label="Free legal aid">
+  <aside class="aid narrow" aria-label="Free legal aid" data-i18n-label="l_aid">
     <div class="aidicon" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24"><path fill="currentColor" d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.2 11.4 11.4 0 0 0 3.6.6 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.3.2 2.5.6 3.6a1 1 0 0 1-.3 1z"/></svg></div>
     <div class="aidtext">
       <b data-i18n="aid1">Need help with your own case?</b>

@@ -232,3 +232,60 @@ class TestReport(unittest.TestCase):
     def test_paired_report_handles_a_missing_baseline(self):
         from evalkit.report import paired_report
         self.assertIn("no run labelled", paired_report([self.run_payload("a", 0.5, [1, 0])], "zzz"))
+
+
+class TestCitationPrecision(unittest.TestCase):
+    """Judge-free citation numbers, sliced by question type and compared run to run."""
+
+    def hits(self):
+        return [Hit("c0", 0.5, "t", "Whoever commits murder shall be punished with death.",
+                    {"act_id": 1, "section_id": 302, "act_title": "A", "language": "en"}),
+                Hit("c1", 0.4, "t", "Theft means dishonestly taking movable property.",
+                    {"act_id": 1, "section_id": 378, "act_title": "A", "language": "en"})]
+
+    def test_nothing_cited_is_undefined_not_zero(self):
+        item = EvalItem("q", "murder?", "en", "single", ["1:302"], "death")
+        refused = Answer("murder?", "NOT_FOUND: no", self.hits(), refused=True)
+        self.assertTrue(math.isnan(deterministic_scores(item, refused)["citation_precision"]))
+
+    def test_support_credits_an_entailing_non_gold_citation(self):
+        from rag.entail import LexicalEntailer
+        item = EvalItem("q", "murder and theft?", "en", "multi", ["1:302"], "death")
+        text = ("Whoever commits murder shall be punished with death [1]. "
+                "Theft means dishonestly taking movable property [2].")
+        ans = Answer("murder and theft?", text, self.hits(), cited=[1, 2])
+        s = deterministic_scores(item, ans, entailer=LexicalEntailer())
+        self.assertEqual(s["citation_precision"], 0.5)     # only 1:302 is gold
+        self.assertEqual(s["citation_support"], 1.0)       # but [2] does say it
+        wrong = Answer("q", "Whoever commits murder shall be punished with death [2].",
+                       self.hits(), cited=[2])
+        self.assertEqual(deterministic_scores(item, wrong, entailer=LexicalEntailer())
+                         ["citation_support"], 0.0)
+        self.assertNotIn("citation_support", deterministic_scores(item, ans))
+
+    def test_aggregate_keeps_metrics_the_first_row_lacks(self):
+        agg = aggregate([{"refusal_correct": 1.0}, {"refusal_correct": 0.0, "gold_cited": 1.0}])
+        self.assertEqual(agg["gold_cited"]["n"], 1)
+
+    def test_summary_slices_generation_by_type(self):
+        gen = [{"id": "a", "type": "single", "language": "en", "citation_precision": 1.0},
+               {"id": "b", "type": "multi", "language": "en", "citation_precision": 0.5},
+               {"id": "c", "type": "multi", "language": "bn", "citation_precision": 0.0}]
+        items = [EvalItem(g["id"], "q", g["language"], g["type"], ["1:2"], "r") for g in gen]
+        run = {"per_query": [], "records": [], "latencies": [0.1]}
+        s = summarize("x", {}, items, run, generation=gen)
+        self.assertEqual(s["generation"]["citation_precision"]["n"], 3)
+        self.assertEqual(s["generation_by_type"]["multi"]["citation_precision"]["mean"], 0.25)
+        self.assertEqual(set(s["generation_by_language"]), {"en", "bn"})
+
+    def test_paired_report_on_a_generation_metric(self):
+        from evalkit.report import paired_report
+        def run(label, vals):
+            return {"label": label, "per_query": [{"id": f"q{i}", "recall@5": 1.0}
+                                                  for i in range(len(vals))],
+                    "generation_per_query": [{"id": f"q{i}", "citation_precision": v}
+                                             for i, v in enumerate(vals)]}
+        out = paired_report([run("last", [0.0, 0.5] * 10), run("new", [1.0] * 20)], "last",
+                            "citation_precision")
+        self.assertIn("better", out)
+        self.assertIn("(n=20)", out)

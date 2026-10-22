@@ -111,7 +111,10 @@ def aggregate(per_query: list[dict], confidence: float = 0.95) -> dict:
     if not per_query:
         return {}
     out = {}
-    for metric in per_query[0]:
+    # Every metric any row has: answerable and unanswerable questions score
+    # different things, and the first row must not decide which are reported.
+    metrics = dict.fromkeys(m for q in per_query for m in q)
+    for metric in metrics:
         vals = [q[metric] for q in per_query if metric in q]
         m, lo, hi = bootstrap_ci(vals, confidence)
         out[metric] = {"mean": m, "lo": lo, "hi": hi,

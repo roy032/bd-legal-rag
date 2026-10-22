@@ -5,6 +5,40 @@ open is in [IMPROVEMENTS.md](IMPROVEMENTS.md).
 
 ## Unreleased
 
+### Quality and safety (no laptop index needed)
+- Citation precision in end-to-end reports: `citation_precision` (cited sections that
+  are gold) is now undefined rather than 0 when nothing is cited, and a new
+  `citation_support` also credits a cited excerpt that entails the claim (free lexical
+  entailer by default, `--support-entailer nli` for the model). Both are printed by
+  question type, and `bdrag compare --metric citation_precision` runs the paired test
+  against the last run. Generation metrics are sliced by type and language.
+- Fix: a generation metric the first question did not have (`gold_cited` when the first
+  question was unanswerable) was silently left out of the summary.
+- Red team: `data/eval/redteam.jsonl`, 52 probes (prompt injection, prompt leaks,
+  quoting-tag breakout, personal data, and 14 legal questions that look like attacks)
+  in Bangla, English and romanised Bangla. `bdrag redteam` runs the static checks in CI
+  and, with `--provider ollama`, checks what the model says.
+- Injection patterns in Bangla and romanised Bangla; imperative only, so "what if I
+  disobey a court order" is not flagged. A question can no longer close its own
+  `<user_question>` tag.
+- Personal data (`BDRAG_REDACT_PII`, on by default): phone, NID, card and passport numbers
+  and emails are replaced before the model, the cache, the logs and feedback see them.
+
+### Observability and delivery
+- Optional OpenTelemetry export of the request spans (`BDRAG_OTEL_ENDPOINT`, `otel` extra).
+- Read-only root filesystem in Compose and in the CI smoke test; SBOM (SPDX, CycloneDX)
+  attached to each GitHub release and kept per CI run.
+
+### Accessibility
+- axe-core (WCAG 2.1 A/AA) in CI on the home page, settings and an answer, in Bangla
+  and English, light and dark, plus a keyboard-only pass (`tests/a11y/`).
+- Fixed what it found: uncited sources were dimmed below the AA contrast ratio; the
+  feedback box had no label; screen-reader labels were English only and now follow the
+  page language; the example tabs support arrow keys with one tab stop; Enter on a
+  citation moves focus to its source; the answer is `aria-busy` while it streams, so a
+  screen reader reads it once instead of token by token; the theme button reports its
+  state.
+
 ### Service
 - Probes: `GET /livez` (the process answers) and `GET /readyz` (200 once the index and
   models are loaded; never starts the load). `/health` is unchanged.

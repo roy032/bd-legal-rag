@@ -134,6 +134,8 @@ OCR, and prints the command that fixes each failure.
 | `BDRAG_DAILY_LIMIT=500` | caps answers per day on a public demo |
 | `BDRAG_MAX_INFLIGHT=2`, `BDRAG_MAX_QUEUE=8` | how many answers run at once and wait; past that a visitor gets the matching sections straight away instead of a minute-long wait ([operations](docs/OPERATIONS.md)) |
 | `LOG_FORMAT=json` | one JSON log line per event, stamped with the request id |
+| `BDRAG_OTEL_ENDPOINT=http://localhost:4318/v1/traces` | also sends each request's stages to Jaeger or Grafana Tempo (`pip install -e ".[otel]"`) |
+| `BDRAG_REDACT_PII=true` (default) | phone, NID, card, passport numbers and emails in a question are replaced before the model or any log sees them |
 
 `RUN_UPGRADES.bat` (or `bdrag measure-upgrades`) measures translation, the reranker and
 the answering model on the test and scenario sets and writes `results/UPGRADES.md`.

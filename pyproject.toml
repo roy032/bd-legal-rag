@@ -24,6 +24,8 @@ llm = ["anthropic>=0.39", "openai>=1.40"]
 redis = ["redis>=5.0"]
 pdf = ["pymupdf>=1.24", "pytesseract>=0.3", "pillow>=10.0"]
 hub = ["huggingface_hub>=0.24"]
+# BDRAG_OTEL_ENDPOINT exports the request spans over OTLP/HTTP (service/tracing.py).
+otel = ["opentelemetry-sdk>=1.24", "opentelemetry-exporter-otlp-proto-http>=1.24"]
 dev = ["httpx2>=2.0", "ruff>=0.6", "mypy>=1.11", "coverage>=7.6", "pip-audit>=2.7"]
 
 [project.scripts]

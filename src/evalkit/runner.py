@@ -81,9 +81,22 @@ def summarize(label: str, config: dict, items: list[EvalItem], run: dict,
         "env": {"python": platform.python_version()},
     }
     if generation:
-        summary["generation"] = aggregate(
-            [{k: v for k, v in g.items() if not k.startswith("_") and k != "id"} for g in generation])
+        summary["generation"] = aggregate([_gen_scores(g) for g in generation])
+        # Citation precision and the refusal rate differ most by question type
+        # (an exact-reference question cites one section; a scenario cites several).
+        for field in ("type", "language"):
+            values = sorted({g[field] for g in generation if field in g})
+            if values:
+                summary[f"generation_by_{field}"] = {
+                    v: aggregate([_gen_scores(g) for g in generation if g.get(field) == v])
+                    for v in values}
     return summary
+
+
+def _gen_scores(row: dict) -> dict:
+    """The numeric scores of a generation row: no id, slice labels or judge notes."""
+    return {k: v for k, v in row.items()
+            if not k.startswith("_") and k not in ("id", "type", "language")}
 
 
 def save(summary: dict, run: dict, out_dir: str | Path, label: str,
@@ -100,6 +113,8 @@ def save(summary: dict, run: dict, out_dir: str | Path, label: str,
 
 def fmt(stat: dict) -> str:
     """0.842 [0.78, 0.90]"""
+    if not stat.get("n", 1):
+        return "— (no question scored)"
     return f"{stat['mean']:.3f} [{stat['lo']:.2f}, {stat['hi']:.2f}]"
 
 
@@ -123,5 +138,12 @@ def print_summary(summary: dict) -> None:
         print("  --- generation ---")
         for metric, stat in summary["generation"].items():
             print(f"    {metric:<20} {fmt(stat)}")
+        cite = [m for m in ("citation_precision", "citation_support")
+                if m in summary["generation"]]
+        if cite and "generation_by_type" in summary:
+            print(f"  --- citations by type ({', '.join(cite)}) ---")
+            for value, stats in summary["generation_by_type"].items():
+                cells = "  ".join(fmt(stats[m]) if m in stats else "—" for m in cite)
+                print(f"    {value:<14} {cells}")
     print(f"  retrieval latency: median {summary['latency_s']['median']*1000:.0f} ms, "
           f"p95 {summary['latency_s']['p95']*1000:.0f} ms")
