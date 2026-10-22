@@ -48,7 +48,8 @@ const T = {
     offline: "The answering model is offline. You will still get the matching sections.",
     cited: "cited", notcited: "also retrieved, not cited", official_text: "Official text",
     amended: "amended", repealed: "repealed act", current: "✓ matches the site today", changed: "⚠ changed on the site since indexing",
-    repaired: "re-checked once", cached: "instant (cached)", conf: "confidence", seconds: s => `${s}s`,
+    repaired: "re-checked once", cached: "instant (cached)", similar: "Answered earlier for a very similar question.",
+    similar2: q => `It was: “${q}”. If that is not what you asked, add detail and ask again.`, conf: "confidence", seconds: s => `${s}s`,
     confl: {high: "high", medium: "medium", low: "low"},
     fail: {uncited_sentences: "some sentences lack a citation", invalid_citations: "cites a missing excerpt",
            unsupported_claims: "a claim may not be in the excerpts", fabricated_quotes: "a quote is not verbatim",
@@ -93,7 +94,8 @@ const T = {
     offline: "উত্তর লেখার মডেল এখন বন্ধ। তবু মিলে যাওয়া ধারাগুলো দেখতে পাবেন।",
     cited: "উল্লেখিত", notcited: "পাওয়া গেছে, উল্লেখ করা হয়নি", official_text: "সরকারি পাঠ",
     amended: "সংশোধিত", repealed: "রহিত আইন", current: "✓ সাইটের বর্তমান পাঠের সঙ্গে মেলে", changed: "⚠ সূচিভুক্তির পর সাইটে বদলেছে",
-    repaired: "একবার পুনর্যাচাই", cached: "তাৎক্ষণিক (ক্যাশ)", conf: "আস্থা", seconds: s => `${toBn(s)} সেকেন্ড`,
+    repaired: "একবার পুনর্যাচাই", cached: "তাৎক্ষণিক (ক্যাশ)", similar: "খুব কাছাকাছি একটি আগের প্রশ্নের উত্তর দেখানো হচ্ছে।",
+    similar2: q => `আগের প্রশ্ন: “${q}”। আপনার প্রশ্নের সঙ্গে না মিললে আরও বিস্তারিত লিখে আবার জিজ্ঞেস করুন।`, conf: "আস্থা", seconds: s => `${toBn(s)} সেকেন্ড`,
     confl: {high: "উচ্চ", medium: "মাঝারি", low: "নিম্ন"},
     fail: {uncited_sentences: "কিছু বাক্যে উৎস নেই", invalid_citations: "অনুপস্থিত অংশের উল্লেখ",
            unsupported_claims: "কোনো দাবি অংশে না-ও থাকতে পারে", fabricated_quotes: "উদ্ধৃতি হুবহু নয়",
@@ -389,6 +391,8 @@ function render(d, opts = {}) {
     $("answer").innerHTML = "";
   } else if (d.answer || d.error) {
     $("answer").innerHTML = md(d.answer || d.error || "");
+    // Served from the paraphrase cache: say which question it answered.
+    if (d.cache_match) setNotice("warn", t("similar"), " " + t("similar2", d.cache_match.question));
   }
   $("guidance").hidden = !d.general_guidance;
   $("gtext").innerHTML = d.general_guidance ? md(d.answer || "") : "";

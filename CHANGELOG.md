@@ -5,6 +5,18 @@ open is in [IMPROVEMENTS.md](IMPROVEMENTS.md).
 
 ## Unreleased
 
+### Faster repeat questions
+- Paraphrase cache (`BDRAG_SEMANTIC_CACHE`, `auto` by default): a reworded question gets
+  the earlier answer in milliseconds instead of a new 20 to 115 second answer. Gated on
+  the settings, script, numbers, negations, topic and the top-5 sections of both
+  questions, then on bge-m3 similarity at 0.965. That threshold merged 40 of 60
+  paraphrases and 0 of 8,250 near misses (`data/eval/paraphrases.jsonl` plus every eval
+  pair with different gold sections). The page names the question the answer was for.
+- `bdrag semcache` measures the threshold for an embedder and fails when a near miss
+  would merge; with `--index` it also applies the section-overlap gate.
+- Query embeddings are memoised, so one request no longer embeds the same question for
+  each act it searches.
+
 ### Quality and safety (no laptop index needed)
 - Citation precision in end-to-end reports: `citation_precision` (cited sections that
   are gold) is now undefined rather than 0 when nothing is cited, and a new

@@ -31,6 +31,34 @@ Answers are cached for `BDRAG_CACHE_TTL` seconds, keyed by the question and ever
 setting that changes the answer (index fingerprint, model, k, retrieval settings).
 `/ask` and `/ask/stream` share the cache, so a repeated question replays its answer.
 
+### Paraphrase cache
+
+On a CPU model an answer takes 20 to 115 seconds, and people ask the same thing in
+different words. `BDRAG_SEMANTIC_CACHE` (default `auto`) serves an earlier answer to a
+question that means the same thing. Every one of these must hold before it does:
+
+| Gate | Why |
+|---|---|
+| same settings as the exact cache key (model, k, index, retrieval, agent, language) | a different pipeline gives a different answer |
+| same script (Bangla, Latin, mixed) | the answer is written in the question's language |
+| same numbers, Bangla or ASCII digits | "section 302" must never get the answer for 304 |
+| same count of negations (not, without, না, নয়, ছাড়া, -নি ...) | "pays rent regularly" vs "does not pay rent" |
+| same everyday situations from the topic table | a dowry question and a dowry-murder question differ |
+| the two questions' dense top-5 sections overlap by `BDRAG_SEMANTIC_OVERLAP` (0.6: four of five) | the model would have been shown the same provisions |
+| cosine of the query embeddings at least the threshold | measured per embedder with `bdrag semcache` |
+
+`auto` uses the measured threshold for the index's embedder (bge-m3: 0.965, which
+merged 40 of 60 paraphrases and none of 8,250 near misses,
+[report](reports/semantic-cache-2026-10-22.md)) and is off for any other embedder. A
+number sets the threshold yourself; run `bdrag semcache --index data/index` first to
+see what it merges. Refusals and general guidance are not offered to paraphrases. A
+served answer carries `cache_match` (the earlier question and the similarity) and the
+page shows that question, so a wrong merge is visible. `semantic_cache_hits_total`
+counts hits; `/stats` shows the cache size and hit rate.
+
+Query embeddings are also memoised (1,024 questions), so the several searches one
+request makes (the question, inside a named act, inside a topic's act) embed it once.
+
 Sizing `BDRAG_MAX_INFLIGHT`: Ollama on a CPU runs one generation at a time
 (`OLLAMA_NUM_PARALLEL=1`), so a second in-flight answer only waits inside Ollama;
 2 keeps the next one's retrieval overlapped with the current generation. With a
