@@ -136,6 +136,7 @@ OCR, and prints the command that fixes each failure.
 | `LOG_FORMAT=json` | one JSON log line per event, stamped with the request id |
 | `BDRAG_OTEL_ENDPOINT=http://localhost:4318/v1/traces` | also sends each request's stages to Jaeger or Grafana Tempo (`pip install -e ".[otel]"`) |
 | `BDRAG_REDACT_PII=true` (default) | phone, NID, card, passport numbers and emails in a question are replaced before the model or any log sees them |
+| `BDRAG_SEMANTIC_CACHE=auto` (default) | a reworded question ("murder punishment" after "what is the punishment for murder") gets the earlier answer in milliseconds, with a note naming the question it answered; on with bge-m3 at the measured threshold, off for other embedders unless you give a number; `off` disables ([how it is gated](docs/OPERATIONS.md#paraphrase-cache)) |
 
 `RUN_UPGRADES.bat` (or `bdrag measure-upgrades`) measures translation, the reranker and
 the answering model on the test and scenario sets and writes `results/UPGRADES.md`.

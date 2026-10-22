@@ -106,6 +106,43 @@ class HashingEmbedder:
     encode_queries = encode_passages
 
 
+class CachedQueryEmbedder:
+    """Remembers query vectors. One request embeds the same question several times
+    (the plain search, the search inside a named or topic act, the paraphrase
+    cache), and people ask the same questions again; a bge-m3 query on CPU costs
+    tens of milliseconds each time. Passages are not cached: they are encoded once,
+    at index time."""
+
+    def __init__(self, inner: Embedder, size: int = 1024) -> None:
+        from collections import OrderedDict
+        from threading import Lock
+
+        self.inner, self.size = inner, size
+        self.name, self.dim = inner.name, inner.dim
+        self._memo: OrderedDict[str, np.ndarray] = OrderedDict()
+        self._lock = Lock()
+
+    def encode_passages(self, texts: list[str]) -> np.ndarray:
+        return self.inner.encode_passages(texts)
+
+    def encode_queries(self, texts: list[str]) -> np.ndarray:
+        out: dict[str, np.ndarray] = {}
+        with self._lock:
+            for t in texts:
+                if t in self._memo:
+                    self._memo.move_to_end(t)
+                    out[t] = self._memo[t]
+        if missing := list(dict.fromkeys(t for t in texts if t not in out)):
+            vecs = self.inner.encode_queries(missing)
+            with self._lock:
+                for t, v in zip(missing, vecs, strict=True):
+                    out[t] = self._memo[t] = v
+                    self._memo.move_to_end(t)
+                while len(self._memo) > self.size:
+                    self._memo.popitem(last=False)
+        return np.vstack([out[t] for t in texts])
+
+
 def get_embedder(kind: str = "st", model: str = "BAAI/bge-m3", index_dir=None, **kw) -> Embedder:
     """kind: 'st' | 'hashing' | 'auto'. 'auto' reads index.json in `index_dir` and
     builds the embedder the index was built with — querying a bge-m3 index with

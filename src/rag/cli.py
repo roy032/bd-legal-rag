@@ -40,6 +40,7 @@ COMMANDS = {
     "measure-upgrades": "measure_upgrades",
     "topics": "topics",
     "redteam": "redteam",
+    "semcache": "semcache",
 }
 SCRIPTS = COMMANDS          # old name, kept for anything that imported it
 

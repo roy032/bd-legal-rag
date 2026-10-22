@@ -50,6 +50,12 @@ Done on 2026-10-21 without the laptop: #3 (code; the run needs the laptop), #5, 
 (the static half; the gemma4 run is `bdrag redteam --provider ollama --llm-model
 gemma4:e4b --index data/index`), #7 and #9. See the changelog.
 
+#4 followed on 2026-10-22, also without the laptop: the threshold only needs question
+embeddings, so it was measured in the cloud with bge-m3
+([report](semantic-cache-2026-10-22.md)). What still needs the laptop: #1, #2 and #8,
+the gemma4 red-team run, and `bdrag semcache --index data/index` to check the
+section-overlap gate on the full index.
+
 Not recommended now: a vector database server (43,966 chunks fit in memory and search
 in milliseconds), Kubernetes manifests (one container on a laptop or a Space), and
 fine-tuning (the eval set is too small to show a gain).

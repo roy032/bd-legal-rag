@@ -57,6 +57,7 @@ from rag.guardrails import GuardConfig
 from rag.llm import LLMError
 from rag.pii import redact
 from rag.pipeline import RetrievalConfig, index_fingerprint
+from rag.topics import match_topics
 from service.backends import make_cache, make_limiter
 from service.cache import cache_key
 from service.cost import estimate_cost, project_monthly
@@ -64,6 +65,7 @@ from service.logs import request_id as request_id_var
 from service.logs import safe_request_id
 from service.metrics import Metrics
 from service.resilience import Admission, Busy, CircuitBreaker, SingleFlight
+from service.semcache import Probe, SemanticCache, evidence, resolve_threshold, signature
 from service.tracing import Trace
 
 STATIC = Path(__file__).parent / "static"
@@ -172,6 +174,11 @@ class ServiceConfig:
     # Replace phone, NID, card, passport numbers and emails in questions and feedback
     # before they reach the model, the cache or the logs (rag/pii.py).
     redact_pii: bool = True
+    # Serve an earlier answer to a paraphrase (service/semcache.py): "auto" uses the
+    # threshold `bdrag semcache` measured for the index's embedder, "off" disables,
+    # a number sets the cosine threshold. Overlap: share of top-5 sections in common.
+    semantic_cache: str = "auto"
+    semantic_overlap: float = 0.6
 
     @classmethod
     def from_env(cls) -> ServiceConfig:
@@ -238,6 +245,8 @@ class ServiceConfig:
             max_body_bytes=_env_int("BDRAG_MAX_BODY", 16_384),
             metrics_token=_env_str("BDRAG_METRICS_TOKEN", ""),
             redact_pii=_env_bool("BDRAG_REDACT_PII", True),
+            semantic_cache=_env_str("BDRAG_SEMANTIC_CACHE", "auto"),
+            semantic_overlap=_env_float("BDRAG_SEMANTIC_OVERLAP", 0.6) or 0.0,
         )
 
 
@@ -370,6 +379,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
     """Build the app. Components can be injected, which is what the tests do —
     a service you cannot construct without a GPU and an API key is untestable."""
     cfg = config or ServiceConfig.from_env()
+    resolve_threshold(cfg.semantic_cache, None)      # a bad BDRAG_SEMANTIC_CACHE fails at start
     metrics = Metrics()
     answers = make_cache(cfg.cache_ttl_s, cfg.cache_size)
     limiter = make_limiter(cfg.rate_per_min, cfg.burst)
@@ -400,11 +410,13 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
             state["load_error"] = None
 
     def _build() -> None:
-        from rag.embed import embedder_for
+        from rag.embed import CachedQueryEmbedder, embedder_for
         from rag.llm import get_llm, get_stream_llm
         from rag.pipeline import build_pipeline, load_records
 
         embedder = embedder_for(cfg.retrieval.mode, cfg.embedder, cfg.model, cfg.index)
+        if embedder is not None:
+            embedder = CachedQueryEmbedder(embedder)
         state["records"] = state["records"] or load_records(cfg.index, cfg.chunks)
         provider, model = split_model(cfg.models[0]) if cfg.models else (cfg.provider, "")
         state["llm"] = state["llm"] or get_llm(provider, model or None)
@@ -413,6 +425,47 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
                                            llm=state["llm"], records=state["records"])
         state["fingerprint"] = index_fingerprint(cfg.index)
         state["ready"] = True
+
+    def semantic() -> SemanticCache | None:
+        """The paraphrase cache, once the pipeline exists; None without a dense
+        embedder, without a threshold for it, or with answer caching off."""
+        if "semantic" not in state:
+            dense = getattr(state["pipeline"], "dense", None)
+            threshold = (resolve_threshold(cfg.semantic_cache, dense.embedder.name)
+                         if dense is not None and cfg.cache_ttl_s else None)
+            state["semantic"] = (SemanticCache(threshold, cfg.semantic_overlap, cfg.cache_size,
+                                               cfg.cache_ttl_s) if threshold else None)
+        return state["semantic"]
+
+    def probe(question: str, scope: str) -> Probe | None:
+        if semantic() is None:
+            return None
+        pipe = state["pipeline"]
+        vector = pipe.dense.embedder.encode_queries([question])[0]
+        topics = [t.name for t in match_topics(question)] if pipe.config.topics else []
+        hits = pipe.dense.store.search(vector, k=5)
+        return Probe(question, vector, signature(question, scope, topics), evidence(hits))
+
+    def semantic_hit(question: str, scope: str):
+        """(cached payload, probe): payload is None on a miss; the probe is kept so
+        the fresh answer can be added under this question afterwards."""
+        try:
+            p = probe(question, scope)
+        except Exception:                    # the cache must never fail a request
+            log.exception("paraphrase cache lookup failed")
+            return None, None
+        if p is None or (m := state["semantic"].lookup(p)) is None:
+            return None, p
+        if (hit := answers.get(m.key)) is None:      # the answer itself expired
+            return None, p
+        metrics.inc("semantic_cache_hits_total")
+        return {**hit, "cached": True, "cache_match": {
+            "question": m.question, "similarity": round(m.similarity, 3)}}, p
+
+    def remember_paraphrase(p: Probe | None, key: str, ans) -> None:
+        # A refusal is cheap to recompute and depends on exact wording; keep only answers.
+        if p is not None and not ans.refused and not ans.general:
+            state["semantic"].add(key, p)
 
     def guard() -> GuardConfig:
         if "entailer" not in state:
@@ -626,6 +679,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
                        "retrieval": cfg.retrieval.to_dict()},
             "index_fingerprint": state["fingerprint"],
             "cache": answers.stats(),
+            "semantic_cache": sem.stats() if (sem := semantic()) else None,
             "admission": admission.stats(),
             "circuit": {"state": breaker.state, "trips": breaker.trips,
                         "consecutive_failures": breaker.failures},
@@ -733,13 +787,16 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
             return await degraded_retrieval(question, k)
         use_agent = cfg.agent_enabled and (bool(body.get("agent")) or
                                            (cfg.agent_auto and wants_agent(question)))
-        key = cache_key(question, k=k, agent=use_agent, language=body.get("language"),
-                        model=model_id,
-                        fingerprint=state["fingerprint"], retrieval=cfg.retrieval.to_dict(),
-                        min_score=cfg.min_score)
+        setting = {"k": k, "agent": use_agent, "language": body.get("language"), "model": model_id,
+                   "fingerprint": state["fingerprint"], "retrieval": cfg.retrieval.to_dict(),
+                   "min_score": cfg.min_score}
+        key = cache_key(question, **setting)
         if (hit := answers.get(key)) is not None:
             metrics.inc("cache_hits_total")
             return JSONResponse({**hit, "cached": True})
+        similar, para = await run_in_threadpool(semantic_hit, question, cache_key("", **setting))
+        if similar is not None:
+            return JSONResponse(similar)
         breaker_mode = breaker.allow()
         if (unavailable := await model_unavailable(question, k, breaker_mode)) is not None:
             return unavailable
@@ -812,6 +869,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         out = serialize(ans, answer_id=answer_id)
         await check_live(ans, out)
         answers.put(key, out)
+        remember_paraphrase(para, key, ans)
         remember(answer_id, out, ans, client, use_agent)
         trace.finish(endpoint="ask", refused=ans.refused, agent=use_agent,
                      llm_calls=ans.llm_calls)
@@ -843,13 +901,18 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
 
         headers = {"cache-control": "no-cache", "x-accel-buffering": "no"}
         # Same key as a non-agent /ask, so either endpoint can serve the other's answer.
-        key = cache_key(question, k=k, agent=False, language=body.get("language"),
-                        model=model_id, fingerprint=state["fingerprint"],
-                        retrieval=cfg.retrieval.to_dict(), min_score=cfg.min_score)
+        setting = {"k": k, "agent": False, "language": body.get("language"), "model": model_id,
+                   "fingerprint": state["fingerprint"], "retrieval": cfg.retrieval.to_dict(),
+                   "min_score": cfg.min_score}
+        key = cache_key(question, **setting)
         if (hit := answers.get(key)) is not None:
             metrics.inc("cache_hits_total")
             cached = {**hit, "cached": True}
             return StreamingResponse(iter([sse("final", cached)]),
+                                     media_type="text/event-stream", headers=headers)
+        similar, para = await run_in_threadpool(semantic_hit, question, cache_key("", **setting))
+        if similar is not None:
+            return StreamingResponse(iter([sse("final", similar)]),
                                      media_type="text/event-stream", headers=headers)
         breaker_mode = breaker.allow()
         if (unavailable := await model_unavailable(question, k, breaker_mode)) is not None:
@@ -886,6 +949,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
                             if cfg.verify_live and not ans.refused:
                                 live_statuses(ans, out)
                             answers.put(key, out)
+                            remember_paraphrase(para, key, ans)
                             remember(answer_id, out, ans, client, False)
                             yield sse("final", out)
                         else:
