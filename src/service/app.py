@@ -33,6 +33,7 @@ Three things here that are easy to get wrong and expensive to get wrong:
 from __future__ import annotations
 
 import hashlib
+import hmac
 import html
 import json
 import logging
@@ -537,17 +538,19 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
 
     salt = os.urandom(16)
 
-    def pseudonym(client: str | None) -> str:
+    def visitor(request: Request) -> str:
         """The query log counts repeat visitors without holding their IP address: a
-        salted hash, with a salt that lives only as long as the process."""
-        return hashlib.sha256(salt + str(client).encode()).hexdigest()[:12]
+        keyed hash of the address (never of an API key), with a key that lives only as
+        long as the process."""
+        address = _client(request, cfg.trust_proxy).encode()
+        return hmac.new(salt, address, hashlib.sha256).hexdigest()[:12]
 
-    def remember(answer_id: str, out: dict, ans, client, use_agent: bool) -> None:
+    def remember(answer_id: str, out: dict, ans, client: str, use_agent: bool) -> None:
         """Permalink store (bounded) + one analytics row per answer, for both
         the plain and the streaming endpoint."""
         recent.put(answer_id, out)
         _append_jsonl(cfg.analytics_path, {
-            "ts": time.time(), "id": answer_id, "client": pseudonym(client),
+            "ts": time.time(), "id": answer_id, "client": client,
             "question": ans.question,
             "agent": use_agent, "refused": ans.refused, "failures": ans.failures,
             "sources": [s["chunk_id"] for s in ans.sources], "latency_s": round(ans.latency_s, 2)})
@@ -973,7 +976,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         await check_live(ans, out)
         answers.put(key, out)
         remember_paraphrase(para, key, ans)
-        remember(answer_id, out, ans, client, use_agent)
+        remember(answer_id, out, ans, visitor(request), use_agent)
         trace.finish(endpoint="ask", refused=ans.refused, agent=use_agent,
                      llm_calls=ans.llm_calls)
         return JSONResponse(out)
@@ -1031,6 +1034,8 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
                 hits = []
             return sse("final", degraded_payload(question, hits, error))
 
+        who = visitor(request)
+
         def events():
             t0 = time.perf_counter()
             first_token = True
@@ -1058,7 +1063,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
                                 live_statuses(ans, out)
                             answers.put(key, out)
                             remember_paraphrase(para, key, ans)
-                            remember(answer_id, out, ans, client, False)
+                            remember(answer_id, out, ans, who, False)
                             yield sse("final", out)
                         else:
                             yield sse(kind, {k2: v for k2, v in item.items() if k2 != "type"})

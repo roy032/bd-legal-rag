@@ -62,6 +62,15 @@ class TestLaunchPages(unittest.TestCase):
         self.assertEqual(len(rows[0]["client"]), 12)
         self.assertEqual(rows[0]["client"], rows[1]["client"])   # repeat visits still group
 
+    def test_query_log_never_holds_an_api_key(self):
+        pipeline, llm, stream = fake_components()
+        c = TestClient(create_app(
+            ServiceConfig(rate_per_min=6000, burst=100, analytics_path=str(self.log),
+                          api_keys={"secretkey123": 60}),
+            pipeline=pipeline, llm=llm, stream_llm=stream))
+        c.post("/ask", json={"question": "হত্যার শাস্তি কী?"}, headers={"x-api-key": "secretkey123"})
+        self.assertNotIn("secret", self.log.read_text(encoding="utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()
