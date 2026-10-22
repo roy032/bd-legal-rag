@@ -48,6 +48,10 @@
 
     <form id="f" class="askbox" autocomplete="off">
       <label for="q" class="sr" data-i18n="qlabel">Your question</label>
+      <div class="fupill" id="fupill" hidden>
+        <span><span data-i18n="followingup">Following up on</span>: <q id="fuq"></q></span>
+        <button type="button" class="linkbtn" id="fuclear" aria-label="Ask a new question instead" data-i18n-label="l_fuclear">✕</button>
+      </div>
       <textarea id="q" rows="2" maxlength="600" enterkeyhint="send"></textarea>
       <div class="askrow">
         <details class="settings" id="settings">
@@ -88,7 +92,9 @@
 
   <section id="result" hidden>
     <div class="answercol">
+      <p class="thread" id="thread" hidden></p>
       <h2 class="qecho" id="qecho"></h2>
+      <p class="searched" id="searched" hidden></p>
       <article class="card answercard" aria-live="polite" aria-busy="false">
         <header class="cardhead">
           <span class="label" data-i18n="answerlabel">Answer</span>
@@ -110,6 +116,7 @@
             <button type="button" class="chip" id="fbdown" aria-pressed="false" aria-label="Not helpful" data-i18n-label="l_nothelpful"><svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M22 3h-4v12h4zM2 14a2 2 0 0 0 2 2h6.3l-1 4.6v.3c0 .4.2.8.5 1.1l1.1 1 6.6-6.6c.4-.4.5-.9.5-1.4V5a2 2 0 0 0-2-2H7a2 2 0 0 0-1.8 1.2l-3 7.1-.2.7z"/></svg><span data-i18n="no">No</span></button>
           </div>
           <span class="spacer"></span>
+          <button type="button" class="chip" id="followup"><svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2zm-3 9h-4v4h-2v-4H7V9h4V5h2v4h4z"/></svg><span data-i18n="followup">Follow up</span></button>
           <button type="button" class="chip" id="copytext"><svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16 1H4a2 2 0 0 0-2 2v14h2V3h12zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11z"/></svg><span data-i18n="copy">Copy</span></button>
           <button type="button" class="chip" id="share"><svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M18 16a3 3 0 0 0-2.1.8L8.9 12.7a3 3 0 0 0 0-1.4l7-4A3 3 0 1 0 15 5l-.1.7-7 4a3 3 0 1 0 0 4.6l7.1 4.1-.1.6a3 3 0 1 0 3-3z"/></svg><span data-i18n="share">Share</span></button>
           <button type="button" class="chip" id="print"><svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19 8H5a3 3 0 0 0-3 3v6h4v4h12v-4h4v-6a3 3 0 0 0-3-3zm-3 11H8v-5h8zM18 3H6v4h12z"/></svg><span data-i18n="print">Print</span></button>

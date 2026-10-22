@@ -99,6 +99,21 @@ try {
   check(await page.evaluate(() => !!document.querySelector("label[for=fbcomment]") ||
                                   !!document.getElementById("fbcomment").getAttribute("aria-label")),
         "the comment box has a label");
+  // Follow-up: the button moves focus to the box, names the answer it continues, and
+  // the next answer says what it followed and how it was searched.
+  await page.focus("#followup");
+  await page.keyboard.press("Enter");
+  check(await page.evaluate(() => document.activeElement.id === "q" &&
+                                  !document.getElementById("fupill").hidden),
+        "Follow up moves focus to the box and shows what it continues");
+  await audit(page, "follow-up box");
+  await page.keyboard.type("আর জরিমানা?");
+  await page.keyboard.press("Enter");
+  await page.waitForSelector("#actions:not([hidden])", { timeout: 15000 });
+  check(await page.evaluate(() => !document.getElementById("thread").hidden &&
+                                  document.getElementById("fupill").hidden),
+        "the follow-up answer names the question it follows");
+  await audit(page, "follow-up answer");
   await page.click("[data-lang=bn]");
   check(await page.evaluate(() => document.getElementById("theme").getAttribute("aria-label") !== "Switch colour theme"),
         "control labels follow the page language");

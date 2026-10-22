@@ -5,6 +5,14 @@ open is in [IMPROVEMENTS.md](IMPROVEMENTS.md).
 
 ## Unreleased
 
+### Follow-up questions
+- The web app has a **Follow up** button under each answer. `/ask` and `/ask/stream` take
+  `follow_up_of` (an answer id); the server reads up to three earlier turns from its own
+  answer store, rewrites the follow-up into a standalone question (`rag/chat.py`), and
+  retrieves and answers with that. The reply keeps the visitor's words as `question`
+  and adds `searched_for` and `parent`; the page shows both. A request cannot supply a
+  history of its own, and an unknown id is answered as a plain question.
+
 ### Shared links that last
 - Shared answers are stored in SQLite (`BDRAG_ANSWERS_DB`, default
   `data/answers.sqlite3`) instead of a 500-entry dict in memory, so a link pasted into a

@@ -12,7 +12,8 @@ Endpoints
   GET  /stats           config, cache, cost projection
   GET  /metrics         Prometheus text
   POST /search          retrieval only — no model call, free and fast
-  POST /ask             grounded answer with citations and guardrail report
+  POST /ask             grounded answer with citations and guardrail report;
+                        {"follow_up_of": "<answer id>"} continues a conversation
   POST /ask/stream      the same, streamed as server-sent events
   POST /feedback        thumbs up/down + comment, appended to a JSONL file
   GET  /a/{id}          permalink to a previously produced answer
@@ -61,6 +62,7 @@ from starlette.staticfiles import StaticFiles
 
 from rag.agent import AgentConfig, LegalAgent
 from rag.answer import answer_question, answer_question_stream
+from rag.chat import condense
 from rag.guardrails import GuardConfig
 from rag.llm import LLMError
 from rag.pii import redact
@@ -541,6 +543,49 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
             "agent": use_agent, "refused": ans.refused, "failures": ans.failures,
             "sources": [s["chunk_id"] for s in ans.sources], "latency_s": round(ans.latency_s, 2)})
 
+    def thread_history(parent_id: str, turns: int = 3) -> list[tuple[str, str]]:
+        """The earlier turns of a conversation, oldest first, read from the answer store
+        rather than from the request: the client names the answer it follows up on and
+        the server supplies what was said, so a request cannot invent a history."""
+        out: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        while parent_id and parent_id not in seen and len(out) < turns:
+            seen.add(parent_id)
+            stored = recent.get(parent_id)
+            if not stored:
+                break
+            out.append((stored.get("searched_for") or stored.get("question") or "",
+                        stored.get("answer") or ""))
+            parent_id = str(stored.get("parent") or "")
+        return out[::-1]
+
+    async def follow_up(body: dict, question: str, llm) -> tuple[str, str | None]:
+        """(standalone question, parent id). A follow-up ("and the fine?") retrieves
+        nothing on its own; it is rewritten with the earlier turns first (rag/chat.py).
+        Any failure leaves the question as asked."""
+        parent = str(body.get("follow_up_of") or "").strip()[:32]
+        if not parent or getattr(llm, "offline_stub", False):
+            return question, None
+        history = thread_history(parent)
+        if not history:
+            return question, None
+        standalone = await run_in_threadpool(condense, history, question, llm, 3, True)
+        if cfg.redact_pii:
+            standalone = redact(standalone)[0]
+        metrics.inc("follow_ups_total", rewritten=str(standalone != question))
+        return standalone, parent
+
+    def thread_fields(out: dict, asked: str, standalone: str, parent: str | None) -> dict:
+        """The user's own words stay the question; the rewrite is shown as what was searched."""
+        out.pop("parent", None)
+        out.pop("searched_for", None)
+        out["question"] = asked
+        if parent:
+            out["parent"] = parent
+        if standalone != asked:
+            out["searched_for"] = standalone
+        return out
+
     def pick_model(body: dict):
         """(llm, stream_llm, id) for the model the request asks for; None = unknown model."""
         wanted = (body.get("model") or "").strip()
@@ -831,6 +876,8 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         llm, _, model_id = picked
         if getattr(llm, "offline_stub", False):
             return await degraded_retrieval(question, k)
+        asked = question
+        question, parent = await follow_up(body, question, llm)
         use_agent = cfg.agent_enabled and (bool(body.get("agent")) or
                                            (cfg.agent_auto and wants_agent(question)))
         setting = {"k": k, "agent": use_agent, "language": body.get("language"), "model": model_id,
@@ -839,10 +886,10 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         key = cache_key(question, **setting)
         if (hit := answers.get(key)) is not None:
             metrics.inc("cache_hits_total")
-            return JSONResponse({**hit, "cached": True})
+            return JSONResponse(thread_fields({**hit, "cached": True}, asked, question, parent))
         similar, para = await run_in_threadpool(semantic_hit, question, cache_key("", **setting))
         if similar is not None:
-            return JSONResponse(similar)
+            return JSONResponse(thread_fields(similar, asked, question, parent))
         breaker_mode = breaker.allow()
         if (unavailable := await model_unavailable(question, k, breaker_mode)) is not None:
             return unavailable
@@ -912,7 +959,8 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
             record_cost(ans)
 
         answer_id = uuid.uuid4().hex[:10]
-        out = serialize(ans, answer_id=answer_id)
+        ans.question = asked
+        out = thread_fields(serialize(ans, answer_id=answer_id), asked, question, parent)
         await check_live(ans, out)
         answers.put(key, out)
         remember_paraphrase(para, key, ans)
@@ -941,6 +989,8 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         llm, stream_llm, model_id = picked
         if getattr(stream_llm, "offline_stub", False):
             return await degraded_retrieval(question, k)
+        asked = question
+        question, parent = await follow_up(body, question, llm)
 
         def sse(event: str, data: dict) -> str:
             return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
@@ -953,11 +1003,12 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         key = cache_key(question, **setting)
         if (hit := answers.get(key)) is not None:
             metrics.inc("cache_hits_total")
-            cached = {**hit, "cached": True}
+            cached = thread_fields({**hit, "cached": True}, asked, question, parent)
             return StreamingResponse(iter([sse("final", cached)]),
                                      media_type="text/event-stream", headers=headers)
         similar, para = await run_in_threadpool(semantic_hit, question, cache_key("", **setting))
         if similar is not None:
+            similar = thread_fields(similar, asked, question, parent)
             return StreamingResponse(iter([sse("final", similar)]),
                                      media_type="text/event-stream", headers=headers)
         breaker_mode = breaker.allow()
@@ -991,7 +1042,9 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
                                         outcome="refused" if ans.refused else "answered")
                             record_cost(ans)
                             answer_id = uuid.uuid4().hex[:10]
-                            out = serialize(ans, answer_id=answer_id)
+                            ans.question = asked
+                            out = thread_fields(serialize(ans, answer_id=answer_id), asked,
+                                                question, parent)
                             if cfg.verify_live and not ans.refused:
                                 live_statuses(ans, out)
                             answers.put(key, out)

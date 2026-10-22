@@ -27,6 +27,9 @@ const T = {
     trust2: "Every claim cited to a section", trust3: "Free, no sign-up",
     examples: "Try a question", glabel: "General guidance — not from the indexed law text",
     trace: "What the deeper search did", helpful: "Helpful", nothelpful: "Not helpful", copy: "Copy",
+    followup: "Follow up", followingup: "Following up on", l_fuclear: "Ask a new question instead",
+    placeholder3: "Ask a follow-up, e.g. “And what is the fine?”",
+    followupto: q => `Follow-up to: “${q}”`, searchedas: q => `Searched as: “${q}”`,
     share: "Share", print: "Print", useful: "Was this useful?", yes: "Yes", no: "No", call: "Call",
     eyebrow: "Free · Bangla & English · Cited to the section", enterhint: "Enter to ask · Shift+Enter for a new line",
     answerlabel: "Answer", send: "Send", sources: "Sources from the law",
@@ -74,6 +77,9 @@ const T = {
     trust2: "প্রতিটি কথার সঙ্গে ধারার উল্লেখ", trust3: "বিনামূল্যে, নিবন্ধন লাগে না",
     examples: "একটি প্রশ্ন দিয়ে শুরু করুন", glabel: "সাধারণ দিকনির্দেশনা — সূচিভুক্ত আইনের পাঠ থেকে নয়",
     trace: "গভীর অনুসন্ধানে কী করা হলো", helpful: "উপকারী", nothelpful: "উপকারী নয়", copy: "কপি",
+    followup: "আরও জিজ্ঞেস করুন", followingup: "আগের প্রশ্নের সূত্রে", l_fuclear: "নতুন প্রশ্ন করুন",
+    placeholder3: "এই উত্তরের সূত্রে প্রশ্ন লিখুন, যেমন: “আর জরিমানা কত?”",
+    followupto: q => `আগের প্রশ্ন: “${q}”`, searchedas: q => `যেভাবে খোঁজা হয়েছে: “${q}”`,
     share: "শেয়ার", print: "প্রিন্ট", useful: "উত্তরটি কি কাজে লেগেছে?", yes: "হ্যাঁ", no: "না", call: "কল করুন",
     eyebrow: "বিনামূল্যে · বাংলা ও ইংরেজি · ধারাসহ উত্তর", enterhint: "Enter চাপলে প্রশ্ন যাবে · নতুন লাইনে Shift+Enter",
     answerlabel: "উত্তর", send: "পাঠান", sources: "আইনের উৎস",
@@ -148,7 +154,7 @@ function applyLang(lang) {
     else el.textContent = t(key);
   });
   document.querySelectorAll("[data-i18n-label]").forEach(el => el.setAttribute("aria-label", t(el.dataset.i18nLabel)));
-  $("q").placeholder = t(document.body.classList.contains("answered") ? "placeholder2" : "placeholder");
+  $("q").placeholder = t(followOf ? "placeholder3" : document.body.classList.contains("answered") ? "placeholder2" : "placeholder");
   document.querySelectorAll(".seg [data-lang]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.lang === LANG)));
   renderTabs();
   renderHistory();
@@ -430,7 +436,9 @@ function render(d, opts = {}) {
       `<li>${esc(t("step", x.step))}: ${esc(x.tool || x.type)}${x.parallel > 1 ? " ×" + esc(x.parallel) : ""}` +
       `${x.new_excerpts != null ? esc(t("excerptsplus", x.new_excerpts)) : ""}</li>`).join("");
   } else { $("tracewrap").hidden = true; }
+  if (d.searched_for) { $("searched").hidden = false; $("searched").textContent = t("searchedas", d.searched_for); }
   currentId = d.id || null;
+  $("followup").hidden = !currentId || !!d.degraded;
   $("actions").hidden = !(d.answer || d.degraded);
   $("fbup").hidden = $("fbdown").hidden = !currentId;
   $("share").hidden = !currentId;
@@ -449,8 +457,28 @@ function busy(on) {
   $("stop").hidden = !on;
 }
 
-function startView(question) {
+// ------------------------------------------------------------------ follow-ups
+// The server keeps the conversation: a follow-up names the answer it continues and the
+// server rewrites it with the stored turns ("and the fine?" -> a standalone question).
+let followOf = null;
+function setFollow(id, question) {
+  followOf = id || null;
+  $("fupill").hidden = !followOf;
+  $("fuq").textContent = question || "";
+  box.placeholder = t(followOf ? "placeholder3" : document.body.classList.contains("answered") ? "placeholder2" : "placeholder");
+}
+$("followup").onclick = () => {
+  if (!currentId) return;
+  setFollow(currentId, $("qecho").textContent);
+  window.scrollTo({top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"});
+  box.focus();
+};
+$("fuclear").onclick = () => { setFollow(null); box.focus(); };
+
+function startView(question, parentQ = "") {
   $("settings").open = false;
+  $("thread").hidden = !parentQ; $("thread").textContent = parentQ ? t("followupto", parentQ) : "";
+  $("searched").hidden = true; $("searched").textContent = "";
   document.body.classList.add("answered");
   // The question moves to the heading above the answer; the box is free for the next one.
   box.value = ""; grow(); box.placeholder = t("placeholder2");
@@ -482,22 +510,25 @@ async function submit() {
     startView(question); box.value = question; grow();      // keep the text so it can be shortened
     steps(null); $("skeleton").hidden = true; setNotice("warn", t("toolong", MAX_CHARS)); return;
   }
-  startView(question);
+  const parent = followOf, parentQ = $("fuq").textContent;
+  setFollow(null);
+  startView(question, parent ? parentQ : "");
   rememberQ(question);
   busy(true);
   controller = new AbortController();
   const useAgent = $("agent").checked, k = +$("k").value || 5;
+  const thread = parent ? {follow_up_of: parent} : {};
   try {
     // The agent makes several calls and has nothing to stream in between, so it
     // uses the plain endpoint; single-shot answers stream token by token.
     if (useAgent) {
       steps("s_search");
       const r = await fetch("/ask", {method: "POST", headers: {"content-type": "application/json"}, signal: controller.signal,
-        body: JSON.stringify({question, k, agent: true, model: chosenModel()})});
+        body: JSON.stringify({question, k, agent: true, model: chosenModel(), ...thread})});
       if (!r.ok && r.status !== 503) { $("skeleton").hidden = true; steps(null); setNotice("bad", await failed(r)); }
       else render(await r.json());
     } else {
-      await stream(question, k);
+      await stream(question, k, thread);
     }
   } catch (e) {
     $("skeleton").hidden = true; $("answer").classList.remove("caret");
@@ -509,9 +540,9 @@ async function submit() {
 }
 $("stop").onclick = () => { if (controller) controller.abort(); };
 
-async function stream(question, k) {
+async function stream(question, k, thread = {}) {
   const r = await fetch("/ask/stream", {method: "POST", headers: {"content-type": "application/json"},
-    signal: controller.signal, body: JSON.stringify({question, k, model: chosenModel()})});
+    signal: controller.signal, body: JSON.stringify({question, k, model: chosenModel(), ...thread})});
   if (!r.ok) {
     if (r.status === 503) { render(await r.json()); return; }
     $("skeleton").hidden = true; steps(null); setNotice("bad", await failed(r)); return;
