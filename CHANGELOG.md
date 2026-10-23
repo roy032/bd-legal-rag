@@ -5,6 +5,32 @@ open is in [IMPROVEMENTS.md](IMPROVEMENTS.md).
 
 ## Unreleased
 
+### Launch pages and privacy
+- `/privacy` (and `/terms`): what is kept and for how long, who sees a question, the
+  not-legal-advice terms and the 16430 legal-aid line, in English and Bangla, linked
+  from the footer. Review it before a public launch; it describes the default settings.
+- `/robots.txt` keeps shared answers and the API out of search engines;
+  `/manifest.webmanifest` lets a phone add the app to its home screen.
+- The query log stores a salted hash of the client instead of its IP address; the salt
+  lives only as long as the process.
+- The accessibility check covers the privacy page and the follow-up states.
+
+### Follow-up questions
+- The web app has a **Follow up** button under each answer. `/ask` and `/ask/stream` take
+  `follow_up_of` (an answer id); the server reads up to three earlier turns from its own
+  answer store, rewrites the follow-up into a standalone question (`rag/chat.py`), and
+  retrieves and answers with that. The reply keeps the visitor's words as `question`
+  and adds `searched_for` and `parent`; the page shows both. A request cannot supply a
+  history of its own, and an unknown id is answered as a plain question.
+
+### Shared links that last
+- Shared answers are stored in SQLite (`BDRAG_ANSWERS_DB`, default
+  `data/answers.sqlite3`) instead of a 500-entry dict in memory, so a link pasted into a
+  chat still works after a restart, a deploy, or 500 newer answers. Deleted after
+  `BDRAG_ANSWER_DAYS` (90). Falls back to memory if the file cannot be opened.
+- A shared link's page carries the question as its title and the answer's opening as
+  the link-preview text, and `noindex`. The page shows the date the answer was given.
+
 ### Faster repeat questions
 - Paraphrase cache (`BDRAG_SEMANTIC_CACHE`, `auto` by default): a reworded question gets
   the earlier answer in milliseconds instead of a new 20 to 115 second answer. Gated on

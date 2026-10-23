@@ -114,6 +114,7 @@ jobs:
             --cap-drop ALL --security-opt no-new-privileges:true \
             -e BDRAG_FEEDBACK=/app/data/logs/feedback.jsonl \
             -e BDRAG_ANALYTICS=/app/data/logs/queries.jsonl \
+            -e BDRAG_ANSWERS_DB=/app/data/logs/answers.sqlite3 \
             -e RAG_LLM=echo -e LOG_FORMAT=json \
             -e BDRAG_RATE_PER_MIN=100000 -e BDRAG_BURST=1000 bd-legal-rag:ci
           for i in $(seq 1 60); do
@@ -149,6 +150,8 @@ jobs:
           docker exec api cat /app/data/logs/feedback.jsonl | grep -q '\[phone\]'
           ! docker exec api grep -q 01712345678 /app/data/logs/feedback.jsonl
           ! docker logs api 2>&1 | grep -q 'could not append'
+          # Shared answers go to the mounted directory, so links survive a restart.
+          curl -fsS localhost:8000/stats | python -c "import json,sys; assert json.load(sys.stdin)['shared_answers']['durable']"
 
       # Software bill of materials for the image: every OS and Python package in it.
       - name: SBOM
