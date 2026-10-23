@@ -64,3 +64,9 @@ bilingual UI with share, print, copy, history and feedback.
 
 Not recommended now: a service worker for offline use (a cached legal answer that
 silently goes stale is worse than an offline notice), accounts, and payment.
+
+## Screenshots
+
+[Follow-up answer, desktop](../screenshots/v3-followup-desktop-en-answer.png) ·
+[Follow-up box, mobile Bangla](../screenshots/v3-followup-mobile-bn-box.png) ·
+[Privacy page, mobile](../screenshots/v3-privacy-mobile.png)
