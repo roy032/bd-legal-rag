@@ -272,11 +272,10 @@ def index_built_at(index_dir: str | Path) -> float | None:
         return None
     try:
         stamp = json.loads(path.read_text(encoding="utf-8")).get("built_at")
-        if stamp:
-            return float(calendar.timegm(time.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ")))
+        built = float(calendar.timegm(time.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ"))) if stamp else None
     except (OSError, ValueError, TypeError):
-        pass
-    return path.stat().st_mtime
+        built = None                 # unreadable stamp: fall back to the file's date
+    return built if built is not None else path.stat().st_mtime
 
 
 # --------------------------------------------------------------------- wiring

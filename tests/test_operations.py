@@ -263,7 +263,7 @@ class TestAlertRules(unittest.TestCase):
         unknown = {n for n in names - builtin - records
                    if not n.startswith("bdrag:")} - exported
         self.assertEqual(unknown, set())
-        self.assertTrue({"requests_total", "index_age_seconds", "circuit_open"} <= names)
+        self.assertEqual({"requests_total", "index_age_seconds", "circuit_open"} - names, set())
 
 
 @unittest.skipUnless(HAVE_STARLETTE, "starlette not installed")

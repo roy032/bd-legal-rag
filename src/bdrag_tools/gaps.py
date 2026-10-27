@@ -146,8 +146,9 @@ def markdown(report: dict, top: int = 30) -> str:
         lines += ["", "## What visitors said", ""]
         for g in commented:
             lines.append(f"- *{_cell(g['question'][:100])}*: " + " / ".join(_cell(c) for c in g["comments"]))
-    lines += ["", "Turn the ones that should have been answered into eval questions with "
-              "`bdrag feedback-to-eval`, then fix and measure with `bdrag eval`.", ""]
+    advice = ("Turn the ones that should have been answered into eval questions with "
+              "`bdrag feedback-to-eval`, then fix and measure with `bdrag eval`.")
+    lines += ["", advice, ""]
     return "\n".join(lines)
 
 
