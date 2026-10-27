@@ -71,11 +71,11 @@ tests:
               summary: "p95 /search is 2.425s (SLO 1 s)"
               runbook: "an embedder on a busy CPU, or the reranker turned on (BDRAG_RERANK)"
 
-  # An index older than 45 days.
-  - interval: 10m
+  # An index older than 45 days. Samples a minute apart: a gap over 5 minutes is stale data.
+  - interval: 1m
     input_series:
       - series: 'index_age_seconds{job="bdrag"}'
-        values: '4000000x12'
+        values: '4000000x120'
     alert_rule_test:
       - eval_time: 90m
         alertname: BdragIndexStale
