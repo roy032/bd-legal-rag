@@ -259,10 +259,10 @@ def markdown(report: dict) -> str:
     verdict = "**met**" if report["launch_bar_met"] else "**not met**"
     lines = ["# Lawyer review of the answers", "",
              f"{report['graded']} answers graded, {report['declined']} declined questions checked. "
-             f"Launch bar {verdict}.", ""]
+             + f"Launch bar {verdict}.", ""]
     lines += [f"- {'✓' if ok else '✗'} {name}" for name, ok in report["checks"].items()]
     lines += ["", "Rates are the share graded fully yes, with a 95% interval; with 50 answers the "
-              "interval is about ±10 points, so a difference smaller than that is noise.", "",
+              + "interval is about ±10 points, so a difference smaller than that is noise.", "",
               "| Criterion | All | " + " | ".join(report["by_language"]) + " |",
               "|---|---|" + "---|" * len(report["by_language"])]
     for name, _label, _ in CRITERIA:
@@ -277,9 +277,9 @@ def markdown(report: dict) -> str:
             lines += ["", f"## {heading}", "", "| id | lang | question | reviewer's notes |",
                       "|---|---|---|---|"]
             lines += [f"| {r['id']} | {r['language']} | {_cell(r['question'][:120])} | "
-                      f"{_cell(r['notes']) or '–'} |" for r in report[key]]
+                      + f"{_cell(r['notes']) or '–'} |" for r in report[key]]
     lines += ["", "Each wrong answer is a test case: fix the topic table, the eval gold or the "
-              "prompt, then re-run `bdrag e2e` on these ids.", ""]
+              + "prompt, then re-run `bdrag e2e` on these ids.", ""]
     return "\n".join(lines)
 
 
