@@ -1,0 +1,86 @@
+# promtool test rules alerts.test.yml : the alerts fire when they should, and only then.
+rule_files: [alerts.yml]
+evaluation_interval: 30s
+tests:
+  # Half the requests failing, and no errors_total series yet: the fast burn still pages.
+  - interval: 30s
+    input_series:
+      - series: 'requests_total{job="bdrag",path="/ask",status="200"}'
+        values: '0+10x240'
+      - series: 'requests_total{job="bdrag",path="/ask",status="500"}'
+        values: '0+10x240'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: BdragErrorBudgetFastBurn
+        exp_alerts:
+          - exp_labels: { severity: page }
+            exp_annotations:
+              summary: "5xx at 50%: 2% of the monthly error budget per hour"
+              runbook: "docker logs, filter level=error; a model outage shows as circuit_open first"
+
+  # A healthy service, with /readyz answering 503 while loading, pages nobody.
+  - interval: 30s
+    input_series:
+      - series: 'requests_total{job="bdrag",path="/search",status="200"}'
+        values: '0+100x240'
+      - series: 'requests_total{job="bdrag",path="/readyz",status="503"}'
+        values: '0+50x240'
+      - series: 'up{job="bdrag"}'
+        values: '1x240'
+      - series: 'ready{job="bdrag"}'
+        values: '1x240'
+      - series: 'circuit_open{job="bdrag"}'
+        values: '0x240'
+    alert_rule_test:
+      - { eval_time: 90m, alertname: BdragErrorBudgetFastBurn, exp_alerts: [] }
+      - { eval_time: 90m, alertname: BdragErrorBudgetSlowBurn, exp_alerts: [] }
+      - { eval_time: 90m, alertname: BdragDown, exp_alerts: [] }
+      - { eval_time: 90m, alertname: BdragNotReady, exp_alerts: [] }
+      - { eval_time: 90m, alertname: BdragModelCircuitOpen, exp_alerts: [] }
+
+  # The model's circuit stays open: page after 5 minutes, not before.
+  - interval: 1m
+    input_series:
+      - series: 'circuit_open{job="bdrag"}'
+        values: '1x20'
+    alert_rule_test:
+      - { eval_time: 3m, alertname: BdragModelCircuitOpen, exp_alerts: [] }
+      - eval_time: 10m
+        alertname: BdragModelCircuitOpen
+        exp_alerts:
+          - exp_labels: { severity: page, job: bdrag }
+            exp_annotations:
+              summary: "the answering model has failed repeatedly; visitors get sections only"
+              runbook: "curl $OLLAMA_HOST/api/version, or the hosted model's quota page"
+
+  # Every /search between 1 and 2.5 s: the latency SLO alert opens a ticket.
+  - interval: 1m
+    input_series:
+      - series: 'request_seconds_bucket{job="bdrag",path="/search",le="1.0"}'
+        values: '0x60'
+      - series: 'request_seconds_bucket{job="bdrag",path="/search",le="2.5"}'
+        values: '0+10x60'
+      - series: 'request_seconds_bucket{job="bdrag",path="/search",le="+Inf"}'
+        values: '0+10x60'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: BdragSearchSlow
+        exp_alerts:
+          - exp_labels: { severity: ticket }
+            exp_annotations:
+              summary: "p95 /search is 2.425s (SLO 1 s)"
+              runbook: "an embedder on a busy CPU, or the reranker turned on (BDRAG_RERANK)"
+
+  # An index older than 45 days.
+  - interval: 10m
+    input_series:
+      - series: 'index_age_seconds{job="bdrag"}'
+        values: '4000000x12'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: BdragIndexStale
+        exp_alerts:
+          - exp_labels: { severity: ticket, job: bdrag }
+            exp_annotations:
+              summary: "the index was built 46d 7h 6m 40s ago; amended acts may be quoted as they were"
+              runbook: "re-ingest and rebuild: bdrag ingest, bdrag index --bm25, then restart"

@@ -31,10 +31,10 @@ bilingual UI with share, print, copy, history and feedback.
 | 3 | **No follow-up questions.** `rag/chat.py` existed but the service and page never used it; "and the fine?" retrieved nothing | high | **fixed in this round** |
 | 4 | **No privacy policy or terms**, and the query log held raw IP addresses | high for a public launch | **fixed in this round** (page needs your review) |
 | 5 | **Answers take 20 to 115 s on a laptop CPU.** Caches help repeat questions only | high | open: host the model on a machine with a GPU, or offer the free hosted models already supported (Groq, Gemini) with the consent notice the page already shows |
-| 6 | **The index is a snapshot with no refresh schedule.** Parliament amends acts; `BDRAG_VERIFY_LIVE` is opt-in and per answer | medium | open: monthly re-ingest job and the index date on the page |
+| 6 | **The index is a snapshot with no refresh schedule.** Parliament amends acts; `BDRAG_VERIFY_LIVE` is opt-in and per answer | medium | partly done 2026-10-27: index age in `/readyz`, `/metrics`, `bdrag doctor` and a stale-index alert; the monthly re-ingest itself still needs the laptop |
 | 7 | **Statutes only.** No case law, rules, SROs or gazette notifications, which is where much practical law lives | medium | open: state the scope on the page; add rules/SROs if bdlaws exposes them |
-| 8 | **One laptop is the whole production.** No backup of `data/answers.sqlite3`, no uptime alert, no domain | medium | open: HF Space with persistent storage or a small VPS, a nightly copy of the data directory, a free uptime monitor |
-| 9 | **Query and feedback logs grow forever** | low | open: rotate monthly; the privacy page only promises retention for shared answers |
+| 8 | **One laptop is the whole production.** No backup of `data/answers.sqlite3`, no uptime alert, no domain | medium | partly done 2026-10-27: `bdrag backup` (verified archives), the uptime workflow and SLO alert rules; hosting and a domain still open |
+| 9 | **Query and feedback logs grow forever** | low | **fixed 2026-10-27**: `BDRAG_LOG_DAYS` (90) and the privacy page says so |
 | 10 | **Known retrieval misses** (English question to a Bangla-only act; wording shared across many acts) | medium | open: laptop items #1 and #8 of [the last plan](next-upgrades-2026-10-21.md) |
 
 ## Done in this round
@@ -58,7 +58,7 @@ bilingual UI with share, print, copy, history and feedback.
 | 3 | Hosting: GPU or free hosted model, a domain, HTTPS, backups, uptime alert | M | money or accounts | latency and availability are what visitors judge first |
 | 4 | Monthly re-ingest with the index date shown on the page | S | laptop | stale law is a legal-safety problem |
 | 5 | Bangla voice input (browser speech recognition, `bn-BD`) | S | no | many visitors are more comfortable speaking than typing Bangla |
-| 6 | "Questions we could not answer" report from the query log, feeding the topic table | S | no | turns refusals into the next content work |
+| 6 | "Questions we could not answer" report from the query log, feeding the topic table (**done 2026-10-27: `bdrag gaps`**) | S | no | turns refusals into the next content work |
 | 7 | Upload a notice or contract and ask about it (local OCR already exists) | L | no | the most common real situation is "I received this paper" |
 | 8 | District legal-aid office directory | M | data | 16430 is national; people need the nearest office |
 

@@ -12,6 +12,7 @@ measure what approximate search costs you in recall.
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -128,7 +129,8 @@ class NumpyStore:
         jsonio.write_jsonl(path / "records.jsonl", self.records, compress=compress)
         (path / "index.json").write_text(
             json.dumps({"dim": self.dim, "embedder": self.embedder_name, "count": len(self),
-                        "quantized": self.quantize, "vector_dtype": "float16"},
+                        "quantized": self.quantize, "vector_dtype": "float16",
+                        "built_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
                        ensure_ascii=False, indent=2), encoding="utf-8")
 
     @classmethod

@@ -130,6 +130,11 @@ jobs:
             --concurrency 8 --requests 400 --slo-p95-ms 1000 --max-error-rate 0 \
             --json-out /tmp/load.json
 
+      - name: Synthetic probe (the uptime workflow's check)
+        run: |
+          python scripts/probe.py --url http://localhost:8000 \
+            --canary "বীমা আইনের সংক্ষিপ্ত শিরোনাম কী?" --json-out /tmp/probe.json
+
       - name: Degraded answer, headers and logs
         run: |
           code=$(curl -s -o /tmp/ask.json -w '%{http_code}' -X POST localhost:8000/ask \
@@ -174,6 +179,21 @@ jobs:
             /tmp/load.json
             /tmp/sbom.spdx.json
           if-no-files-found: ignore
+
+  # The alert rules are code: they must parse, and the unit tests in alerts.test.yml
+  # (a fast error burn pages, a loading /readyz does not, a stale index tickets) pass.
+  monitoring:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: promtool check and test
+        run: |
+          docker run --rm -v "$PWD/deploy/monitoring:/m:ro" -w /m --entrypoint promtool \
+            prom/prometheus:v2.53.2 check rules alerts.yml
+          docker run --rm -v "$PWD/deploy/monitoring:/m:ro" -w /m --entrypoint promtool \
+            prom/prometheus:v2.53.2 check config prometheus.yml
+          docker run --rm -v "$PWD/deploy/monitoring:/m:ro" -w /m --entrypoint promtool \
+            prom/prometheus:v2.53.2 test rules alerts.test.yml
 
   # The UI is the product for most visitors: axe-core (WCAG 2.1 AA) on the home
   # page, settings and an answer, in Bangla and English, light and dark, plus a

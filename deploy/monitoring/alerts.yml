@@ -1,0 +1,130 @@
+# Prometheus recording and alerting rules for bd-legal-rag.
+#
+# Load with `rule_files: [alerts.yml]` (prometheus.yml in this folder does). The scrape
+# job must be called "bdrag". Checked in CI with `promtool check rules` and
+# `promtool test rules alerts.test.yml`; tests/test_monitoring.py fails if a rule
+# names a metric the service does not export.
+#
+# SLOs (see docs/OPERATIONS.md#slos-and-alerts):
+#   availability  99.5% of requests are not 5xx over 30 days (error budget 0.5%)
+#   search        p95 under 1 s (the CI load test holds the image to the same)
+#   answers       p95 under 120 s on a laptop CPU (lower it once a GPU or hosted model serves)
+# Burn-rate alerts follow the multi-window scheme of the Google SRE workbook: page
+# when 2% of the monthly budget burns in an hour, ticket when 10% burns in 3 days.
+groups:
+  - name: bdrag-slo-recording
+    interval: 30s
+    rules:
+      # /readyz answers 503 by design while the index loads; it is not a failed request.
+      # Each side of the sum gets its own `or vector(0)`: errors_total has no series
+      # until the first unhandled error, and a missing operand would hide every 5xx.
+      - record: bdrag:error_ratio:rate5m
+        expr: |
+          ((sum(rate(requests_total{job="bdrag",status=~"5..",path!="/readyz"}[5m])) or vector(0))
+            + (sum(rate(errors_total{job="bdrag"}[5m])) or vector(0)))
+          / clamp_min(sum(rate(requests_total{job="bdrag",path!="/readyz"}[5m])), 1e-9)
+      - record: bdrag:error_ratio:rate30m
+        expr: |
+          ((sum(rate(requests_total{job="bdrag",status=~"5..",path!="/readyz"}[30m])) or vector(0))
+            + (sum(rate(errors_total{job="bdrag"}[30m])) or vector(0)))
+          / clamp_min(sum(rate(requests_total{job="bdrag",path!="/readyz"}[30m])), 1e-9)
+      - record: bdrag:error_ratio:rate1h
+        expr: |
+          ((sum(rate(requests_total{job="bdrag",status=~"5..",path!="/readyz"}[1h])) or vector(0))
+            + (sum(rate(errors_total{job="bdrag"}[1h])) or vector(0)))
+          / clamp_min(sum(rate(requests_total{job="bdrag",path!="/readyz"}[1h])), 1e-9)
+      - record: bdrag:error_ratio:rate6h
+        expr: |
+          ((sum(rate(requests_total{job="bdrag",status=~"5..",path!="/readyz"}[6h])) or vector(0))
+            + (sum(rate(errors_total{job="bdrag"}[6h])) or vector(0)))
+          / clamp_min(sum(rate(requests_total{job="bdrag",path!="/readyz"}[6h])), 1e-9)
+      - record: bdrag:search_seconds:p95_10m
+        expr: histogram_quantile(0.95, sum by (le) (rate(request_seconds_bucket{job="bdrag",path="/search"}[10m])))
+      - record: bdrag:answer_seconds:p95_30m
+        expr: histogram_quantile(0.95, sum by (le) (rate(answer_seconds_bucket{job="bdrag"}[30m])))
+      # Share of answers given from retrieval only (queue full, model down, model error).
+      - record: bdrag:degraded_ratio:rate15m
+        expr: |
+          ((sum(rate(shed_total{job="bdrag"}[15m])) or vector(0))
+            + (sum(rate(circuit_open_total{job="bdrag"}[15m])) or vector(0))
+            + (sum(rate(degraded_total{job="bdrag"}[15m])) or vector(0)))
+          / clamp_min(sum(rate(answers_total{job="bdrag"}[15m])), 1e-9)
+
+  - name: bdrag-alerts
+    rules:
+      - alert: BdragDown
+        expr: up{job="bdrag"} == 0
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: "bd-legal-rag is not answering scrapes"
+          runbook: "docs/OPERATIONS.md#slos-and-alerts: check the container is running and /livez answers"
+
+      - alert: BdragNotReady
+        expr: ready{job="bdrag"} == 0
+        for: 15m
+        labels: { severity: page }
+        annotations:
+          summary: "the index or models have not loaded for 15 minutes"
+          runbook: "GET /readyz shows the load error; usually a missing index or an out-of-memory embedder"
+
+      - alert: BdragErrorBudgetFastBurn
+        expr: bdrag:error_ratio:rate1h > (14.4 * 0.005) and bdrag:error_ratio:rate5m > (14.4 * 0.005)
+        for: 2m
+        labels: { severity: page }
+        annotations:
+          summary: "5xx at {{ $value | humanizePercentage }}: 2% of the monthly error budget per hour"
+          runbook: "docker logs, filter level=error; a model outage shows as circuit_open first"
+
+      - alert: BdragErrorBudgetSlowBurn
+        expr: bdrag:error_ratio:rate6h > (6 * 0.005) and bdrag:error_ratio:rate30m > (6 * 0.005)
+        for: 15m
+        labels: { severity: ticket }
+        annotations:
+          summary: "5xx at {{ $value | humanizePercentage }} over 6 h: the 30-day budget runs out in 5 days"
+
+      - alert: BdragSearchSlow
+        expr: bdrag:search_seconds:p95_10m > 1
+        for: 15m
+        labels: { severity: ticket }
+        annotations:
+          summary: "p95 /search is {{ $value | humanizeDuration }} (SLO 1 s)"
+          runbook: "an embedder on a busy CPU, or the reranker turned on (BDRAG_RERANK)"
+
+      - alert: BdragAnswersSlow
+        expr: bdrag:answer_seconds:p95_30m > 120
+        for: 30m
+        labels: { severity: ticket }
+        annotations:
+          summary: "p95 answer time is {{ $value | humanizeDuration }} (SLO 120 s)"
+          runbook: "check OLLAMA_KEEP_ALIVE and BDRAG_MAX_INFLIGHT; a cold model reloads per answer"
+
+      - alert: BdragModelCircuitOpen
+        expr: circuit_open{job="bdrag"} == 1
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: "the answering model has failed repeatedly; visitors get sections only"
+          runbook: "curl $OLLAMA_HOST/api/version, or the hosted model's quota page"
+
+      - alert: BdragShedding
+        expr: bdrag:degraded_ratio:rate15m > 0.10
+        for: 15m
+        labels: { severity: ticket }
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of answers are retrieval-only"
+          runbook: "more traffic than one model serves: raise BDRAG_MAX_INFLIGHT on a bigger machine, or add a hosted model"
+
+      - alert: BdragDailyCapReached
+        expr: increase(daily_limit_total{job="bdrag"}[1h]) > 0
+        labels: { severity: ticket }
+        annotations:
+          summary: "visitors are being turned away by BDRAG_DAILY_LIMIT"
+
+      - alert: BdragIndexStale
+        expr: index_age_seconds{job="bdrag"} > 45 * 86400
+        for: 1h
+        labels: { severity: ticket }
+        annotations:
+          summary: "the index was built {{ $value | humanizeDuration }} ago; amended acts may be quoted as they were"
+          runbook: "re-ingest and rebuild: bdrag ingest, bdrag index --bm25, then restart"

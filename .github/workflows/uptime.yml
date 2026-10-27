@@ -1,0 +1,64 @@
+name: Uptime probe
+
+# Checks the public service every 30 minutes the way a visitor would (alive, ready,
+# a canary search, the home page, index age) and keeps one open issue labelled
+# "uptime" while it fails; the issue is closed by the first passing run.
+# Off until you set, in Settings > Secrets and variables > Actions > Variables:
+#   BDRAG_URL = https://<you>-<space>.hf.space   (or your domain)
+# GitHub's scheduled runs can start a few minutes late; this is a free safety net,
+# not a pager.
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: uptime
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    if: ${{ vars.BDRAG_URL != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Probe
+        id: probe
+        continue-on-error: true
+        env:
+          BDRAG_URL: ${{ vars.BDRAG_URL }}
+        # A Space that slept wakes on the first request: one retry before calling it down.
+        run: |
+          python scripts/probe.py --url "$BDRAG_URL" --max-index-age-days 60 --json-out probe.json \
+            || { sleep 60; python scripts/probe.py --url "$BDRAG_URL" --max-index-age-days 60 --json-out probe.json; }
+      - name: Open, update or close the uptime issue
+        uses: actions/github-script@v7
+        env:
+          OUTCOME: ${{ steps.probe.outcome }}
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.existsSync('probe.json') ? JSON.parse(fs.readFileSync('probe.json', 'utf8')) : null;
+            const failing = process.env.OUTCOME !== 'success';
+            const lines = report ? report.checks.map(c => `- ${c.ok ? '✅' : '❌'} **${c.check}**: ${c.detail}${c.ms != null ? ` (${c.ms} ms)` : ''}`) : ['- no report written'];
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const { data: open } = await github.rest.issues.listForRepo({ ...context.repo, state: 'open', labels: 'uptime' });
+            if (failing && open.length === 0) {
+              await github.rest.issues.create({ ...context.repo, title: 'Service is failing its uptime probe', labels: ['uptime'],
+                body: `The probe failed at ${report ? report.at : new Date().toISOString()}.\n\n${lines.join('\n')}\n\n[Run](${run}). This issue closes itself when a probe passes.` });
+            } else if (failing) {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: open[0].number, body: `Still failing.\n\n${lines.join('\n')}\n\n[Run](${run})` });
+            } else {
+              for (const issue of open) {
+                await github.rest.issues.createComment({ ...context.repo, issue_number: issue.number, body: `Recovered.\n\n${lines.join('\n')}\n\n[Run](${run})` });
+                await github.rest.issues.update({ ...context.repo, issue_number: issue.number, state: 'closed', state_reason: 'completed' });
+              }
+            }
+            if (failing) core.setFailed('uptime probe failed');

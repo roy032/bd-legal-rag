@@ -5,6 +5,35 @@ open is in [IMPROVEMENTS.md](IMPROVEMENTS.md).
 
 ## Unreleased
 
+### Operations: retention, backups, freshness, alerts
+- **Retention for the logs.** The query and feedback logs hold visitors' questions and
+  used to grow forever. Rows older than `BDRAG_LOG_DAYS` (90, the same as shared
+  answers) are deleted by a background task that runs at startup and every
+  `BDRAG_HOUSEKEEPING_S` (6 h), together with the shared-answer purge.
+  `retention_deleted_total{store}` counts what went; `/stats` shows the policy and the
+  last run. Appends and prunes share a lock, so no row is lost mid-rewrite.
+- **`bdrag backup`**: a consistent copy of `answers.sqlite3` taken while the service
+  runs (SQLite online backup), plus the logs, in one `.tar.gz` with a SHA-256 manifest;
+  keeps the newest 14. `--verify` checks checksums and the database's integrity;
+  `--restore` verifies first and will not overwrite without `--force`.
+- **Index age.** `index.json` records `built_at`; `/health`, `/readyz` and `/stats` report
+  it, `/metrics` exports `index_age_seconds`, and `bdrag doctor` warns past
+  `BDRAG_INDEX_MAX_AGE_DAYS` (45). Older indexes fall back to the file's date.
+- **`bdrag gaps`**: the questions that were refused, got general guidance only, failed a
+  guardrail or got a thumbs-down, grouped and ranked by distinct visitors, with the
+  topic-table entry each matched (or none). The query log now records `general`.
+- **SLOs and alerts as code** in `deploy/monitoring/`: availability 99.5% with
+  multi-window burn-rate alerts, `/search` p95 under 1 s, answers p95 under 120 s, model
+  circuit open, shedding, daily cap, stale index. `promtool check` and `promtool test
+  rules` run in CI; a unit test fails if a rule names a metric the service does not
+  export. `docker compose --profile monitoring up` starts Prometheus with them.
+- **`bdrag probe`** and an uptime workflow: every 30 minutes (once `BDRAG_URL` is set as a
+  repository variable) the live service is checked like a visitor would hit it; one
+  issue labelled `uptime` stays open while it fails and closes itself on recovery. The
+  Docker CI job runs the same probe against the built image.
+- `bdrag <tool>` now exits with the tool's status, so `bdrag backup --verify` and
+  `bdrag semcache` fail a script when they fail.
+
 ### Launch pages and privacy
 - `/privacy` (and `/terms`): what is kept and for how long, who sees a question, the
   not-legal-advice terms and the 16430 legal-aid line, in English and Bangla, linked
