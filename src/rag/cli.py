@@ -45,6 +45,7 @@ COMMANDS = {
     "gaps": "gaps",
     "probe": "probe",
     "review": "review",
+    "scorecard": "scorecard",
 }
 SCRIPTS = COMMANDS          # old name, kept for anything that imported it
 

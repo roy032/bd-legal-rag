@@ -62,6 +62,7 @@ from starlette.responses import (
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
+from evalkit import scorecard
 from rag.agent import AgentConfig, LegalAgent
 from rag.answer import answer_question, answer_question_stream
 from rag.chat import condense
@@ -1154,9 +1155,14 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
     async def privacy_page(request: Request):
         return FileResponse(STATIC / "privacy.html")
 
+    async def accuracy_page(request: Request):
+        # Rendered from the same scorecard.json as docs/ACCURACY.md, so the page,
+        # the README and the file served at /static/scorecard.json cannot disagree.
+        return HTMLResponse(scorecard.html_page(scorecard.load()))
+
     async def robots(request: Request):
         # Shared answers hold what visitors asked; the API is not content.
-        return PlainTextResponse("User-agent: *\nAllow: /$\nAllow: /privacy\nAllow: /static/\n"
+        return PlainTextResponse("User-agent: *\nAllow: /$\nAllow: /privacy\nAllow: /accuracy\nAllow: /static/\n"
                                  "Disallow: /a/\nDisallow: /ask\nDisallow: /search\n"
                                  "Disallow: /metrics\nDisallow: /stats\n")
 
@@ -1176,6 +1182,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         Route("/", index_page),
         Route("/privacy", privacy_page),
         Route("/terms", privacy_page),
+        Route("/accuracy", accuracy_page),
         Route("/robots.txt", robots),
         Route("/manifest.webmanifest", manifest),
         Route("/health", health),

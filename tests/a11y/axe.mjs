@@ -56,6 +56,8 @@ try {
     await audit(page, `answer ${lang} ${theme}`);
     await page.goto(BASE + "/privacy");
     await audit(page, `privacy ${lang} ${theme}`);
+    await page.goto(BASE + "/accuracy");
+    await audit(page, `accuracy ${lang} ${theme}`);
     await context.close();
   }
 
