@@ -236,13 +236,14 @@ def acts_table(records: list[dict], index_built: float | None = None) -> list[di
     """Every act in the index, with its source and how current our copy is.
 
     Section-level amendment years roll up to the act: the newest amendment any
-    of its sections reflects is the act's "last amended".
+    of its sections reflects is the act's "last amended". Rules, SROs and
+    judgments are listed on /coverage, not here.
     """
     acts: dict[int, dict] = {}
     for r in records:
         m = r.get("metadata") or {}
         aid = m.get("act_id")
-        if aid is None:
+        if aid is None or (m.get("doc_type") or "act") != "act":
             continue
         a = acts.setdefault(aid, {"act_id": aid, "title": m.get("act_title"),
                                   "act_number": m.get("act_number"), "year": m.get("act_year"),

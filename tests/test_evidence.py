@@ -151,6 +151,12 @@ class TestProvenance(unittest.TestCase):
         (a,) = acts_table(recs)
         self.assertEqual((a["sections"], a["amended_sections"], a["last_amended"]), (1, 1, 2021))
         self.assertEqual((a["as_of"], a["as_of_kind"]), ("2026-09-03", "fetched"))
+        # Judgments and rules from the sources manifest belong on /coverage, not the Acts list.
+        others = [{"metadata": {"act_id": 900001, "act_title": "X v State", "doc_type": "judgment",
+                                "type": "judgment"}},
+                  {"metadata": {"act_id": 900002, "act_title": "Some Rules", "doc_type": "rule",
+                                "type": "section", "section_id": 1}}]
+        self.assertEqual([r["act_id"] for r in acts_table(recs + others)], [5])
 
     def test_fetcher_reports_the_cache_day(self):
         with tempfile.TemporaryDirectory() as d:
