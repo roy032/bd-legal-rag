@@ -1,6 +1,12 @@
 data/*
 !data/sample/
 !data/eval/
+# Rules, SROs and judgments to ingest (bdrag sources), and the /coverage page's
+# hand-written gaps. The published list of unanswered questions comes from the
+# query log: it stays out of git, and the operator reviews it before deploying.
+!data/sources/
+!data/coverage/
+data/coverage/public_gaps.json
 data/eval/todo.jsonl
 results/*.json
 __pycache__/

@@ -13,5 +13,6 @@ current state is in the main [README](../../README.md) and [CHANGELOG](../../CHA
 | 2026-10-21 | [Production upgrades and what comes next](next-upgrades-2026-10-21.md) | probes, load shedding, circuit breaker, metrics, CI gates and supply chain; the ranked list after them |
 | 2026-10-22 | [Paraphrase cache threshold](semantic-cache-2026-10-22.md) | bge-m3 similarity of 60 paraphrases against 8,250 near misses; why 0.965 and which gates stop what |
 | 2026-10-22 | [Launch audit](launch-audit-2026-10-22.md) | what a public launch still needs: lawyer review, hosting, refresh; durable share links, follow-ups and a privacy page done |
+| 2026-10-28 | [Coverage beyond the Acts](coverage-2026-10-28.md) | rules, SROs and Supreme Court judgments via `bdrag sources`; the public /coverage page; laptop re-index steps |
 
 Screenshots of the web UI are in [../screenshots/](../screenshots/).

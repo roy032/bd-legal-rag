@@ -42,7 +42,9 @@ const T = {
     how1: "Your question is matched against the sections of Bangladeshi Acts published on the Laws of Bangladesh website, in Bangla and English.",
     how2: "The closest sections are given to a language model, which answers only from them and cites each claim as [n].",
     how3: "Automatic checks confirm every citation points to a real excerpt. If the law text does not cover the question, it says so.",
-    scope: "Covers the Acts published on the Laws of Bangladesh website. Court decisions, rules, SROs and gazette notifications are not included yet.",
+    scope: "Covers the Acts published on the Laws of Bangladesh website, plus the rules and court judgments listed on the coverage page. Most rules, SROs and court decisions are not included yet.",
+    coverage: "What we can't answer yet",
+    k_rule: "rules", k_regulation: "regulations", k_sro: "SRO", k_order: "order", k_judgment: "court judgment",
     disclaimer: "Informational only, not legal advice. Laws change: always check the official text before relying on anything here.",
     official: "Laws of Bangladesh (official)", source: "Source code",
     s_search: "Searching the law", s_read: "Reading sections", s_write: "Writing the answer", s_check: "Re-checking citations", s_guide: "Writing general guidance",
@@ -112,7 +114,9 @@ const T = {
     how1: "আপনার প্রশ্ন Laws of Bangladesh ওয়েবসাইটে প্রকাশিত বাংলাদেশের আইনের ধারাগুলোর সঙ্গে মিলিয়ে দেখা হয়, বাংলা ও ইংরেজি দুই ভাষাতেই।",
     how2: "সবচেয়ে কাছের ধারাগুলো একটি ভাষা মডেলকে দেওয়া হয়, যা কেবল সেগুলো থেকেই উত্তর দেয় এবং প্রতিটি কথার পাশে [n] আকারে উৎস দেখায়।",
     how3: "স্বয়ংক্রিয় যাচাই নিশ্চিত করে যে প্রতিটি উল্লেখ একটি আসল অংশকে নির্দেশ করে। আইনের পাঠে উত্তর না থাকলে তা স্পষ্ট বলা হয়।",
-    scope: "শুধু Laws of Bangladesh ওয়েবসাইটে প্রকাশিত আইনগুলো অন্তর্ভুক্ত। আদালতের রায়, বিধিমালা, এসআরও ও গেজেট প্রজ্ঞাপন এখনো যুক্ত নয়।",
+    scope: "Laws of Bangladesh ওয়েবসাইটে প্রকাশিত আইনগুলো, এবং কভারেজ পাতায় তালিকাভুক্ত বিধিমালা ও আদালতের রায় অন্তর্ভুক্ত। বেশিরভাগ বিধিমালা, এসআরও ও আদালতের রায় এখনো যুক্ত নয়।",
+    coverage: "যেসব প্রশ্নের উত্তর এখনো পারি না",
+    k_rule: "বিধিমালা", k_regulation: "প্রবিধানমালা", k_sro: "এসআরও", k_order: "আদেশ", k_judgment: "আদালতের রায়",
     disclaimer: "কেবল তথ্যের জন্য, আইনি পরামর্শ নয়। আইন বদলায়: কোনো কিছুর ওপর নির্ভর করার আগে সরকারি পাঠ দেখে নিন।",
     official: "Laws of Bangladesh (সরকারি সাইট)", source: "সোর্স কোড",
     s_search: "আইনে খোঁজা হচ্ছে", s_read: "ধারা পড়া হচ্ছে", s_write: "উত্তর লেখা হচ্ছে", s_check: "উল্লেখ আবার যাচাই", s_guide: "সাধারণ দিকনির্দেশনা লেখা হচ্ছে",
@@ -413,6 +417,7 @@ function renderSources(cited = null) {
     const badges = [
       s.amended ? `<span class="badge warn" title="This section has been changed by a later act; the text shown is the amended one.">${esc(LANG === "bn" ? s.amended.replace("amended", t("amended")).replace("latest", "সর্বশেষ") : s.amended)}</span>` : "",
       s.repealed ? `<span class="badge bad">${esc(t("repealed"))}</span>` : "",
+      s.doc_type && s.doc_type !== "act" ? `<span class="badge">${esc(t("k_" + s.doc_type) || s.doc_type)}${s.decided ? " · " + esc(s.decided) : ""}</span>` : "",
       s.live_check === "current" ? `<span class="badge ok">${esc(t("current"))}</span>` :
         s.live_check === "changed" ? `<span class="badge warn">${esc(t("changed"))}</span>` : "",
     ].join("");

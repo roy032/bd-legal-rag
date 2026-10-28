@@ -20,6 +20,9 @@ from typing import Any
 
 import numpy as np
 
+from ingest.chunk import unit_label
+from ingest.judgment import judgment_citation
+
 from . import jsonio
 from .embed import l2_normalize
 from .filters import matches
@@ -38,7 +41,10 @@ class Hit:
         m = self.metadata
         if m.get("type") == "act_overview":
             return f"{m['act_title']} (overview)"
-        label = "ধারা" if m.get("language") == "bn" else "section"
+        if m.get("type") == "judgment":
+            return judgment_citation(m)
+        label = unit_label(m.get("doc_type"), m.get("language"))
+        label = label if m.get("language") == "bn" else label.lower()
         return f"{m['act_title']}, {label} {m.get('section_number', '?')}"
 
 

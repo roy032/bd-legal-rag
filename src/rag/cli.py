@@ -46,6 +46,7 @@ COMMANDS = {
     "gaps": "gaps",
     "probe": "probe",
     "review": "review",
+    "sources": "sources",
     "scorecard": "scorecard",
     "start": "start",
 }

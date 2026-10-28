@@ -41,6 +41,10 @@ class Act:
     url: str
     sections: list[SectionRef] = field(default_factory=list)
     repeal_note: str | None = None   # the site's own notice, e.g. '… দ্বারা রহিত করা হইয়াছে।'
+    # 'act' for the statutes bdlaws publishes; 'rule', 'regulation', 'sro', 'order'
+    # for subordinate legislation from data/sources/manifest.jsonl. Judgments have
+    # their own chunker (ingest/judgment.py).
+    doc_type: str = "act"
 
 
 @dataclass
