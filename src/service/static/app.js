@@ -25,13 +25,16 @@ const T = {
     excerpts: "Excerpts read", model: "Model", hosted: "Your question is sent to an outside provider.",
     trust1: "From the official text of Bangladeshi Acts", trust1n: n => `Searches ${n.toLocaleString("en")} sections of Bangladeshi Acts`,
     trust2: "Every claim cited to a section", trust3: "Free, no sign-up",
+    trust4local: "Runs on your computer: your question never leaves it",
+    trust4server: "Answered on this server: no outside AI company sees your question", about: "About",
+    trust4out: w => `Your question is sent to an outside provider (${w})`,
     examples: "Try a question", glabel: "General guidance — not from the indexed law text",
     trace: "What the deeper search did", helpful: "Helpful", nothelpful: "Not helpful", copy: "Copy",
     followup: "Follow up", followingup: "Following up on", l_fuclear: "Ask a new question instead",
     placeholder3: "Ask a follow-up, e.g. “And what is the fine?”",
     followupto: q => `Follow-up to: “${q}”`, searchedas: q => `Searched as: “${q}”`,
     share: "Share", print: "Print", useful: "Was this useful?", yes: "Yes", no: "No", call: "Call",
-    eyebrow: "Free · Bangla & English · Cited to the section", enterhint: "Enter to ask · Shift+Enter for a new line",
+    eyebrow: "Bangla first, English too · Free · Cited to the section", enterhint: "Enter to ask · Shift+Enter for a new line",
     answerlabel: "Answer", send: "Send", sources: "Sources from the law",
     aid1: "Need help with your own case?",
     aid2: "Call the government's free legal aid hotline (National Legal Aid Services Organisation), toll-free, or visit the legal aid office at your district judge's court.",
@@ -76,13 +79,16 @@ const T = {
     excerpts: "কতগুলো অংশ পড়বে", model: "মডেল", hosted: "আপনার প্রশ্ন একটি বাইরের সেবাদাতার কাছে পাঠানো হবে।",
     trust1: "বাংলাদেশের আইনের সরকারি পাঠ থেকে", trust1n: n => `বাংলাদেশের আইনের ${toBn(n.toLocaleString("en"))}টি অংশে খোঁজে`,
     trust2: "প্রতিটি কথার সঙ্গে ধারার উল্লেখ", trust3: "বিনামূল্যে, নিবন্ধন লাগে না",
+    trust4local: "আপনার কম্পিউটারেই চলে: প্রশ্ন বাইরে কোথাও যায় না",
+    trust4server: "এই সার্ভারেই উত্তর লেখা হয়: বাইরের কোনো এআই কোম্পানি প্রশ্ন দেখে না", about: "পরিচিতি",
+    trust4out: w => `আপনার প্রশ্ন একটি বাইরের সেবাদাতার কাছে পাঠানো হয় (${w})`,
     examples: "একটি প্রশ্ন দিয়ে শুরু করুন", glabel: "সাধারণ দিকনির্দেশনা — সূচিভুক্ত আইনের পাঠ থেকে নয়",
     trace: "গভীর অনুসন্ধানে কী করা হলো", helpful: "উপকারী", nothelpful: "উপকারী নয়", copy: "কপি",
     followup: "আরও জিজ্ঞেস করুন", followingup: "আগের প্রশ্নের সূত্রে", l_fuclear: "নতুন প্রশ্ন করুন",
     placeholder3: "এই উত্তরের সূত্রে প্রশ্ন লিখুন, যেমন: “আর জরিমানা কত?”",
     followupto: q => `আগের প্রশ্ন: “${q}”`, searchedas: q => `যেভাবে খোঁজা হয়েছে: “${q}”`,
     share: "শেয়ার", print: "প্রিন্ট", useful: "উত্তরটি কি কাজে লেগেছে?", yes: "হ্যাঁ", no: "না", call: "কল করুন",
-    eyebrow: "বিনামূল্যে · বাংলা ও ইংরেজি · ধারাসহ উত্তর", enterhint: "Enter চাপলে প্রশ্ন যাবে · নতুন লাইনে Shift+Enter",
+    eyebrow: "বাংলায় প্রশ্ন, বাংলায় উত্তর · বিনামূল্যে · ধারাসহ", enterhint: "Enter চাপলে প্রশ্ন যাবে · নতুন লাইনে Shift+Enter",
     answerlabel: "উত্তর", send: "পাঠান", sources: "আইনের উৎস",
     aid1: "নিজের মামলায় সাহায্য দরকার?",
     aid2: "সরকারের বিনামূল্যের আইনগত সহায়তা হটলাইনে (জাতীয় আইনগত সহায়তা প্রদান সংস্থা) টোল-ফ্রি কল করুন, অথবা আপনার জেলা জজ আদালতের লিগ্যাল এইড অফিসে যান।",
@@ -153,7 +159,7 @@ function applyLang(lang) {
   document.querySelectorAll("[data-i18n]").forEach(el => {
     const key = el.dataset.i18n;
     if (key === "trust1" && CORPUS) el.textContent = t("trust1n", CORPUS);
-    else el.textContent = t(key);
+    else el.textContent = t(key, OUTSIDE);
   });
   document.querySelectorAll("[data-i18n-label]").forEach(el => el.setAttribute("aria-label", t(el.dataset.i18nLabel)));
   $("q").placeholder = t(followOf ? "placeholder3" : document.body.classList.contains("answered") ? "placeholder2" : "placeholder");
@@ -243,12 +249,24 @@ $("model").onchange = () => { store.set("bdrag-model", $("model").value); showHo
 const chosenModel = () => $("modelwrap").hidden ? undefined : $("model").value;
 
 // What is loaded: corpus size for the trust line, and a banner when the model is down.
-let CORPUS = null;
+let CORPUS = null, OUTSIDE = "";
 (async () => {
   try {
     const r = await fetch("/health");
     const d = await r.json();
     if (d.chunks) { CORPUS = d.chunks; $("corpusline").textContent = t("trust1n", CORPUS); }
+    // Claimed only when the server found nothing that sends a question elsewhere
+    // (service/privacy.py), and "your computer" only when the browser is on it.
+    if (d.private === true) {
+      $("privtext").dataset.i18n = d.same_machine ? "trust4local" : "trust4server";
+      $("privline").hidden = false;
+    } else if (d.private === false) {
+      // A hosted model even without a picker: the visitor is told before asking.
+      OUTSIDE = [...new Set((d.outbound || []).filter(o => o.carries_question).map(o => o.where))].join(", ");
+      $("privtext").dataset.i18n = "trust4out";
+      $("privline").hidden = false;
+    }
+    if (!$("privline").hidden) $("privtext").textContent = t($("privtext").dataset.i18n, OUTSIDE);
     if (d.status !== "ok" || d.llm_reachable === false) {
       $("banner").innerHTML = `<div class="notice warn">${esc(t("offline"))}</div>`;
       $("banner").hidden = false;

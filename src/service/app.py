@@ -77,6 +77,8 @@ from service.cost import estimate_cost, project_monthly
 from service.logs import request_id as request_id_var
 from service.logs import safe_request_id
 from service.metrics import Metrics
+from service.privacy import model_is_local
+from service.privacy import report as privacy_report
 from service.resilience import Admission, Busy, CircuitBreaker, SingleFlight
 from service.retention import Housekeeper, append_jsonl, prune_jsonl
 from service.semcache import Probe, SemanticCache, evidence, resolve_threshold, signature
@@ -375,6 +377,12 @@ def _client(request: Request, trust_proxy: bool = False) -> str:
     return request.client.host if request.client else "unknown"
 
 
+def is_loopback_client(request: Request) -> bool:
+    """The direct peer only: a forwarded header is the caller's word, not a fact."""
+    host = request.client.host if request.client else ""
+    return host in ("127.0.0.1", "::1", "localhost") or host.startswith("127.")
+
+
 _append_jsonl = append_jsonl     # shares the prune lock (service/retention.py)
 
 
@@ -395,7 +403,6 @@ def wants_agent(question: str) -> bool:
             or classify_request(question)["advice"])
 
 
-LOCAL_PROVIDERS = ("ollama", "compat", "echo")
 
 
 def split_model(spec: str) -> tuple[str, str]:
@@ -417,7 +424,7 @@ def model_options(cfg: ServiceConfig) -> list[dict]:
                 compat_settings(provider, model or None)
             except ValueError:                   # no key for this host: don't offer it
                 continue
-        local = provider in LOCAL_PROVIDERS
+        local = model_is_local(provider)        # by where it connects, not by its name
         out.append({"id": spec, "provider": provider, "model": model or None, "local": local,
                     "label": f"{model or provider} ({'on this machine' if local else provider})"})
     return out
@@ -766,7 +773,11 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
                              "agent_enabled": cfg.agent_enabled,
                              "llm": cfg.provider or "none",
                              "llm_model": cfg.llm_model or None,
-                             "llm_reachable": await run_in_threadpool(llm_reachable)})
+                             "llm_reachable": await run_in_threadpool(llm_reachable),
+                             **privacy_report([o["id"] for o in model_options(cfg)], cfg.verify_live),
+                             # The browser is on the machine that runs the service: the page
+                             # may then say "on your computer" rather than "on this server".
+                             "same_machine": is_loopback_client(request)})
 
     async def livez(request: Request):
         return JSONResponse({"status": "alive"})
@@ -1154,9 +1165,12 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
     async def privacy_page(request: Request):
         return FileResponse(STATIC / "privacy.html")
 
+    async def about_page(request: Request):
+        return FileResponse(STATIC / "about.html")
+
     async def robots(request: Request):
         # Shared answers hold what visitors asked; the API is not content.
-        return PlainTextResponse("User-agent: *\nAllow: /$\nAllow: /privacy\nAllow: /static/\n"
+        return PlainTextResponse("User-agent: *\nAllow: /$\nAllow: /about\nAllow: /privacy\nAllow: /static/\n"
                                  "Disallow: /a/\nDisallow: /ask\nDisallow: /search\n"
                                  "Disallow: /metrics\nDisallow: /stats\n")
 
@@ -1175,6 +1189,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
     routes: list[Route | Mount] = [
         Route("/", index_page),
         Route("/privacy", privacy_page),
+        Route("/about", about_page),
         Route("/terms", privacy_page),
         Route("/robots.txt", robots),
         Route("/manifest.webmanifest", manifest),
