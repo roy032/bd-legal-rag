@@ -52,7 +52,8 @@ def private_env(env: Mapping[str, str], model: str, offline: bool) -> dict[str, 
     # call and every excerpt character is seconds the visitor waits. Each of these
     # can still be set in the environment to override it.
     out.setdefault("RAG_LLM_TIMEOUT", "300")        # reading 5 Bangla excerpts can pass 120 s
-    out.setdefault("RAG_EXCERPT_CHARS", "1000")
+    out.setdefault("RAG_EXCERPT_CHARS", "700")      # measured: ~28 prompt tokens/s on a 15 W laptop CPU
+    out.setdefault("RAG_MAX_TOKENS", "700")         # ~5 tokens/s writing, so 1024 could mean 3 minutes
     out.setdefault("BDRAG_AGENT_AUTO", "false")     # the agent makes up to 5 model calls
     out.setdefault("BDRAG_REWRITE", "none")         # two extra calls when it fires
     if offline:
