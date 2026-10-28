@@ -1,0 +1,141 @@
+{
+  "updated": "2026-10-28",
+  "corpus": "Acts published on the Laws of Bangladesh website (bdlaws.minlaw.gov.bd), 43,966 searchable passages; no court decisions, rules or SROs yet",
+  "intro": "Every number here comes from a command in this repository, run on a fixed set of 96 questions (86 answerable, 10 that the law text cannot answer) that a person wrote with the governing sections marked. Each one says when it was measured, with which model and on what machine, and links the file with every question's result. Where something has not been measured yet, the page says so.",
+  "intro_bn": "এখানে প্রতিটি সংখ্যা এই প্রকল্পের একটি কমান্ড থেকে এসেছে, ৯৬টি নির্দিষ্ট প্রশ্নের ওপর (৮৬টির উত্তর আইনে আছে, ১০টির নেই), যেগুলোর সঠিক ধারা একজন মানুষ আগে থেকে চিহ্নিত করেছেন। প্রতিটি ফলাফলের সঙ্গে কবে, কোন মডেল দিয়ে মাপা হয়েছে তা লেখা আছে। যা এখনও মাপা হয়নি, তা-ও স্পষ্ট বলা আছে।",
+  "caveats": [
+    "**The answer numbers are from qwen2.5:14b on a GPU, not from gemma4:e4b**, the free model the service now uses on a laptop. Re-running them with gemma4:e4b is the next measurement.",
+    "**No lawyer has graded the answers yet.** Until one has, the retrieval and citation numbers say the service finds and cites the right law; they do not say its answers are legally sound.",
+    "Questions that need several sections at once are the weakest kind: all their right sections are in the top 5 for about two in three, and there are only 6 such questions, so that figure is rough.",
+    "The two judge-model rows are graded by an 8-billion-parameter local model. They are indicative only; the citation and refusal rows are checked by code and are the ones to trust.",
+    "The evaluation set is 96 questions. A 95% interval of about ±7 points is the honest precision at that size, so a difference smaller than that is noise.",
+    "Only Acts are covered. A question that turns on a court decision, a rule or an SRO cannot be answered correctly yet; `bdrag gaps` lists the questions visitors asked that the service could not answer."
+  ],
+  "reproduce": "Every command on this page runs on a laptop with free, local models (Ollama with `gemma4:e4b`) and no API key. Build the index once (`bdrag ingest` and `bdrag index`, see the README), run the block's command, then `bdrag scorecard add <block> <result file>`: that updates this page, docs/ACCURACY.md and the README together, and copies the per-question results to `results/published/`. CI runs `bdrag scorecard check`, which fails if the pages are stale or the red-team block no longer matches what the checks give today.",
+  "blocks": {
+    "retrieval": {
+      "source": "results/published/retrieval-2026-10-18-served.json",
+      "metrics": {
+        "recall@5": {
+          "value": 0.907,
+          "ci95": [
+            0.837,
+            0.965
+          ],
+          "n": 86
+        },
+        "mrr": {
+          "value": 0.779,
+          "ci95": [
+            0.703,
+            0.851
+          ],
+          "n": 86
+        },
+        "recall@5 bn": {
+          "value": 0.892,
+          "ci95": [
+            0.797,
+            0.973
+          ],
+          "n": 37
+        },
+        "recall@5 en": {
+          "value": 0.909,
+          "ci95": [
+            0.818,
+            0.977
+          ],
+          "n": 44
+        }
+      },
+      "date": "2026-10-18",
+      "setup": "dense bge-m3 retrieval as served before the topic table, k=10, on the laptop's full index",
+      "questions": 96,
+      "eval_set": "data/eval/eval.jsonl",
+      "note": "The topic table, served since 19 October, raised this to **93.6%** in the right-section-in-top-5 and **0.804** MRR on the same questions ([report](../results/topics-full-index-2026-10-19.md), no interval computed). Re-running the command below records it here with its interval.",
+      "short": "laptop, full index, before the topic table"
+    },
+    "answers": {
+      "source": "results/published/e2e-2026-09-30-qwen25-14b.json",
+      "metrics": {
+        "refusal_correct": {
+          "value": 0.906,
+          "ci95": [
+            0.844,
+            0.958
+          ],
+          "n": 96
+        },
+        "citation_validity": {
+          "value": 1.0,
+          "ci95": [
+            1.0,
+            1.0
+          ],
+          "n": 96
+        },
+        "citation_precision": {
+          "value": 0.715,
+          "ci95": [
+            0.625,
+            0.804
+          ],
+          "n": 86
+        },
+        "gold_cited": {
+          "value": 0.767,
+          "ci95": [
+            0.686,
+            0.849
+          ],
+          "n": 86
+        },
+        "correctness": {
+          "value": 0.709,
+          "ci95": [
+            0.64,
+            0.773
+          ],
+          "n": 86
+        },
+        "faithfulness": {
+          "value": 0.406,
+          "ci95": [
+            0.312,
+            0.51
+          ],
+          "n": 96
+        }
+      },
+      "date": "2026-09-30",
+      "setup": "answers by qwen2.5:14b through Ollama, judged by llama3.1:8b, on a Kaggle T4 GPU; dense retrieval without the topic table, k=5",
+      "questions": 96,
+      "eval_set": "data/eval/eval.jsonl",
+      "note": "citation support was added after this run, so it has no number yet.",
+      "short": "qwen2.5:14b on a Kaggle GPU"
+    },
+    "redteam": {
+      "source": "results/published/redteam-2026-10-28-redteam.json",
+      "metrics": {
+        "passed": {
+          "value": 52,
+          "n": 52
+        }
+      },
+      "date": "2026-10-28",
+      "setup": "static checks, no model; CI runs them on every change",
+      "questions": 52,
+      "by_attack": {
+        "benign": "14/14",
+        "injection": "19/19",
+        "leak": "6/6",
+        "pii": "11/11",
+        "tag_breakout": "2/2"
+      },
+      "short": "static checks, run in CI"
+    },
+    "redteam_llm": null,
+    "lawyer": null
+  }
+}

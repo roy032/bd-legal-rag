@@ -72,19 +72,24 @@ something off the machine (`BDRAG_MODELS`, `RAG_LLM_BASE_URL`, `REDIS_URL`,
                            HTTP API + streaming UI · metrics · cache
 ```
 
-<!-- auto:headline -->
-| Measured on the full corpus (86 test questions) | |
-|---|---|
-| Right section in the top 5 (retrieval) | 0.85 [0.77–0.91] |
-| Citations that point at a retrieved excerpt (qwen2.5:7b) | 0.99 [0.97–1.00] |
-| Citations that point at a retrieved excerpt (qwen2.5:14b) | 1.00 [1.00–1.00] |
-| Refuses exactly when the corpus has no answer (qwen2.5:7b) | 0.86 [0.79–0.93] |
-| Refuses exactly when the corpus has no answer (qwen2.5:14b) | 0.91 [0.84–0.96] |
-| Answer judged correct against the reference (qwen2.5:7b) | 0.53 [0.45–0.62] |
-| Answer judged correct against the reference (qwen2.5:14b) | 0.71 [0.64–0.77] |
+## How accurate is it?
 
-95% bootstrap intervals; details in [Results](#results).
-<!-- /auto:headline -->
+<!-- scorecard:start -->
+
+| Measure | Result | Measured |
+|---|---|---|
+| Right section among the first 5 found | 90.7% (84%–96%) | 2026-10-18, laptop, full index, before the topic table |
+| How high the right section ranks (MRR) | 0.779 (0.70–0.85) | 2026-10-18, laptop, full index, before the topic table |
+| Declines exactly when it should | 90.6% (84%–96%) | 2026-09-30, qwen2.5:14b on a Kaggle GPU |
+| Citations point at a real excerpt | 100% | 2026-09-30, qwen2.5:14b on a Kaggle GPU |
+| Cited sections that are the right ones | 71.5% (62%–80%) | 2026-09-30, qwen2.5:14b on a Kaggle GPU |
+| Attacks: input checks | 52/52 | 2026-10-28, static checks, run in CI |
+| Attacks: what the model said | not measured yet | [how to measure it](docs/ACCURACY.md) |
+| Fully accurate, graded by a lawyer | not measured yet | [how to measure it](docs/ACCURACY.md) |
+
+Every number, its 95% interval, the command that produced it and the gaps: [docs/ACCURACY.md](docs/ACCURACY.md) (the app shows it at `/accuracy`).
+
+<!-- scorecard:end -->
 
 Every stage in the diagram is implemented and switchable; which ones the service
 uses was decided by measurement (see [Results](#results)): on the full corpus, dense

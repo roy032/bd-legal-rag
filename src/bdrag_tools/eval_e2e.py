@@ -17,6 +17,7 @@ runs question by question:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -149,7 +150,10 @@ def main() -> None:
         run = run_retrieval(items, retriever, k=args.k, **search_kw)
     config = {"k": args.k, "sandwich": not args.no_sandwich,
               "answer_llm": args.provider or "env",
+              # Named in the file, so the published scorecard can say which model it was.
+              "answer_model": args.llm_model or os.environ.get("RAG_MODEL"),
               "judge_llm": args.judge_provider or ("none" if args.no_judge else "env"),
+              "judge_model": args.judge_model,
               "eval": args.eval, "agent": bool(agent), "max_steps": args.max_steps,
               "repeats": args.repeats,
               "min_score": args.min_score,

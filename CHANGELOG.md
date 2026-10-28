@@ -5,6 +5,20 @@ open is in [IMPROVEMENTS.md](IMPROVEMENTS.md).
 
 ## Unreleased
 
+### Published accuracy scorecard
+- **`/accuracy`**, a public page in English and Bangla (linked from the footer), plus
+  [docs/ACCURACY.md](docs/ACCURACY.md) and a table at the top of the README, all rendered
+  from one file, `src/service/static/scorecard.json` (also served as JSON). Five blocks:
+  retrieval, answers and citations, red team (input checks), red team (model output) and a
+  lawyer's grades. A block nobody has measured is shown as "not measured yet" with its
+  command; the known weak spots are listed on the page.
+- **`bdrag scorecard add <block> <result file>`** is the only way a number gets in: it reads
+  a `bdrag eval`, `bdrag e2e`, `bdrag redteam --json-out` or `bdrag review score --json`
+  file, records its date and setup, copies the per-question rows to `results/published/`
+  and re-renders. `bdrag scorecard check` runs in CI and fails when a page is stale or the
+  red-team block no longer matches today's checks.
+- `bdrag e2e` now records `answer_model` and `judge_model` in the result file.
+
 ### Verifiable answers
 - **Every statement is checked against the section it cites** (`rag/evidence.py`, no
   model call). Each answer now carries a `verdict` (`grounded`, `partly_grounded`,
