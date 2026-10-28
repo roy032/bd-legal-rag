@@ -67,6 +67,9 @@ jobs:
       - name: Red team (injection and personal data, Bangla, English, romanised)
         run: python scripts/redteam.py --json-out /tmp/results/redteam.json
 
+      - name: Published accuracy scorecard is current (docs/ACCURACY.md, README, red team)
+        run: python scripts/scorecard.py check
+
   security:
     runs-on: ubuntu-latest
     steps:

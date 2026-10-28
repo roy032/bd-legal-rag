@@ -17,6 +17,8 @@ Endpoints
   POST /ask/stream      the same, streamed as server-sent events
   POST /feedback        thumbs up/down + comment, appended to a JSONL file
   GET  /a/{id}          permalink to a previously produced answer
+  GET  /acts            every act in the index: official page, sections, last amended, copied on
+  GET  /sources         the same as a page people can search
 
 Three things here that are easy to get wrong and expensive to get wrong:
 
@@ -62,11 +64,17 @@ from starlette.responses import (
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
+from evalkit import scorecard
 from rag.agent import AgentConfig, LegalAgent
-from rag.answer import answer_question, answer_question_stream
+from rag.answer import answer_question, answer_question_stream, source_card
 from rag.chat import condense
+from rag.evidence import acts_table, provenance
+from rag.glossary import terms_in
 from rag.guardrails import GuardConfig
+from rag.legalaid import directory as legal_aid_directory
+from rag.legalaid import lang_of
 from rag.llm import LLMError
+from rag.nextsteps import checklist
 from rag.pii import redact
 from rag.pipeline import RetrievalConfig, index_built_at, index_fingerprint
 from rag.topics import match_topics
@@ -79,6 +87,8 @@ from service.coverage import render as render_coverage
 from service.logs import request_id as request_id_var
 from service.logs import safe_request_id
 from service.metrics import Metrics
+from service.privacy import model_is_local
+from service.privacy import report as privacy_report
 from service.resilience import Admission, Busy, CircuitBreaker, SingleFlight
 from service.retention import Housekeeper, append_jsonl, prune_jsonl
 from service.semcache import Probe, SemanticCache, evidence, resolve_threshold, signature
@@ -382,6 +392,12 @@ def _client(request: Request, trust_proxy: bool = False) -> str:
     return request.client.host if request.client else "unknown"
 
 
+def is_loopback_client(request: Request) -> bool:
+    """The direct peer only: a forwarded header is the caller's word, not a fact."""
+    host = request.client.host if request.client else ""
+    return host in ("127.0.0.1", "::1", "localhost") or host.startswith("127.")
+
+
 _append_jsonl = append_jsonl     # shares the prune lock (service/retention.py)
 
 
@@ -402,7 +418,6 @@ def wants_agent(question: str) -> bool:
             or classify_request(question)["advice"])
 
 
-LOCAL_PROVIDERS = ("ollama", "compat", "echo")
 
 
 def split_model(spec: str) -> tuple[str, str]:
@@ -424,7 +439,7 @@ def model_options(cfg: ServiceConfig) -> list[dict]:
                 compat_settings(provider, model or None)
             except ValueError:                   # no key for this host: don't offer it
                 continue
-        local = provider in LOCAL_PROVIDERS
+        local = model_is_local(provider)        # by where it connects, not by its name
         out.append({"id": spec, "provider": provider, "model": model or None, "local": local,
                     "label": f"{model or provider} ({'on this machine' if local else provider})"})
     return out
@@ -714,10 +729,14 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
             "answer": None,
             "degraded": True,
             "error": error,
-            "sources": [{"n": n, "citation": h.citation, "url": h.metadata.get("url"),
-                         "text": h.body[:800]} for n, h in enumerate(hits, 1)],
+            "sources": provisions(hits),
             "disclaimer": "Informational only — not legal advice.",
         }
+
+    def provisions(hits) -> list[dict]:
+        built = index_built_at(cfg.index)
+        return [{"n": n, "citation": h.citation, "url": h.metadata.get("url"), "text": h.body[:800],
+                 **provenance(h.metadata, built)} for n, h in enumerate(hits, 1)]
 
     async def degraded_retrieval(question: str, k: int,
                                  error: str = "the answering model is not configured; "
@@ -773,7 +792,11 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
                              "agent_enabled": cfg.agent_enabled,
                              "llm": cfg.provider or "none",
                              "llm_model": cfg.llm_model or None,
-                             "llm_reachable": await run_in_threadpool(llm_reachable)})
+                             "llm_reachable": await run_in_threadpool(llm_reachable),
+                             **privacy_report([o["id"] for o in model_options(cfg)], cfg.verify_live),
+                             # The browser is on the machine that runs the service: the page
+                             # may then say "on your computer" rather than "on this server".
+                             "same_machine": is_loopback_client(request)})
 
     async def livez(request: Request):
         return JSONResponse({"status": "alive"})
@@ -855,19 +878,54 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
              "amended": bool(h.metadata.get("amended")), "text": h.body[:1200]}
             for n, h in enumerate(hits, 1)]})
 
-    def serialize(ans, cached: bool = False, answer_id: str | None = None) -> dict:
+    def dated(src: dict, built: float | None) -> dict:
+        """An excerpt from an index built before ingest recorded fetch days is
+        dated by the index build, and says so (as_of_kind)."""
+        if not src.get("as_of") and built:
+            src.update(as_of=time.strftime("%Y-%m-%d", time.gmtime(built)), as_of_kind="index")
+        return src
+
+    def serialize(ans, cached: bool = False, answer_id: str | None = None,
+                  plain: bool = False) -> dict:
+        lang = lang_of(ans.question)
+        check = ans.verification()
+        built = index_built_at(cfg.index)
+        sources = []
+        for src in ans.sources:
+            src["evidence"] = check["evidence"].get(src["n"], [])
+            sources.append(dated(src, built))
+        # A refusal or general guidance shows what was searched, so the reader can
+        # see for themselves that the closest sections do not answer the question.
+        searched = ([dated({**source_card(n, h, max_chars=600), "evidence": []}, built)
+                     for n, h in enumerate(ans.hits[:3], 1)]
+                    if (ans.refused or ans.general) and ans.hits else [])
+        conf = ans.checks.get("confidence")
+        if conf and conf.get("label") == "high" and check["verdict"] == "partly_grounded":
+            # "High confidence" above "some statements need checking" teaches people
+            # to ignore one of the two; the statement-level check caps the label.
+            conf = {**conf, "label": "medium",
+                    "why": [*conf.get("why", []), "some statements need checking"]}
         return {
             "id": answer_id, "created": int(time.time()),
             "question": ans.question, "answer": ans.text,
             "refused": ans.refused, "abstained": ans.abstained, "repaired": ans.repaired,
             # Not grounded in the indexed laws: label it and replace any streamed draft.
             "general_guidance": ans.general,
-            "failures": ans.failures, "sources": ans.sources,
-            "confidence": ans.checks.get("confidence"),
+            # How to check it (rag.evidence): grounded / partly_grounded / not_found /
+            # general_guidance / off_topic, and each statement with its sections.
+            "verdict": check["verdict"], "claims": check["claims"],
+            "verification": check["summary"], "searched": searched,
+            "failures": ans.failures, "sources": sources,
+            "confidence": conf,
             "llm_calls": ans.llm_calls, "cached": cached,
             "latency_s": round(ans.latency_s, 3),
             "trace": ans.checks.get("trace"), "stop_reason": ans.checks.get("stop_reason"),
             "disclaimer": "Informational only — not legal advice.",
+            # What to do next: cited steps from the answer, practical tips and who to
+            # call (rag/nextsteps.py); None for a question that is not a situation.
+            "next_steps": checklist(ans.question, ans.text, ans.refused, ans.general),
+            "plain": plain,
+            "glossary": terms_in(ans.text, lang) if plain and not ans.refused else [],
         }
 
     def live_statuses(ans, out: dict) -> None:
@@ -917,11 +975,16 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
             return await degraded_retrieval(question, k)
         asked = question
         question, parent = await follow_up(body, question, llm)
-        use_agent = cfg.agent_enabled and (bool(body.get("agent")) or
-                                           (cfg.agent_auto and wants_agent(question)))
+        plain = bool(body.get("plain"))
+        # The agent has its own prompts and no plain-language variant, so a plain
+        # request takes the agent only when it asks for it by name.
+        use_agent = cfg.agent_enabled and (bool(body.get("agent")) or (
+            cfg.agent_auto and not plain and wants_agent(question)))
         setting = {"k": k, "agent": use_agent, "language": body.get("language"), "model": model_id,
                    "fingerprint": state["fingerprint"], "retrieval": cfg.retrieval.to_dict(),
                    "min_score": cfg.min_score}
+        if plain:                     # absent when off, so existing cache keys stay valid
+            setting["plain"] = True
         key = cache_key(question, **setting)
         if (hit := answers.get(key)) is not None:
             metrics.inc("cache_hits_total")
@@ -940,8 +1003,8 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
                 return LegalAgent(state["pipeline"], state["records"] or [], llm,
                                   AgentConfig(max_steps=cfg.max_steps, per_call_k=cfg.k,
                                               guard=guard(), seed=True)).run(question)
-            return answer_question(question, state["pipeline"], llm, k=k,
-                                   guard=guard(), language=body.get("language"))
+            return answer_question(question, state["pipeline"], llm, k=k, guard=guard(),
+                                   plain=plain, language=body.get("language"))
 
         def guarded():
             """One answer per distinct question at a time (single-flight), inside an
@@ -980,8 +1043,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
             return JSONResponse({
                 "question": question, "answer": None, "degraded": True,
                 "error": f"the answering model is unavailable ({e})",
-                "sources": [{"n": n, "citation": h.citation, "url": h.metadata.get("url"),
-                             "text": h.body[:800]} for n, h in enumerate(hits, 1)],
+                "sources": provisions(hits),
                 "disclaimer": "Informational only — not legal advice.",
             }, status_code=503)
 
@@ -999,7 +1061,8 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
 
         answer_id = uuid.uuid4().hex[:10]
         ans.question = asked
-        out = thread_fields(serialize(ans, answer_id=answer_id), asked, question, parent)
+        out = thread_fields(serialize(ans, answer_id=answer_id, plain=plain and not use_agent),
+                            asked, question, parent)
         await check_live(ans, out)
         answers.put(key, out)
         remember_paraphrase(para, key, ans)
@@ -1039,6 +1102,9 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         setting = {"k": k, "agent": False, "language": body.get("language"), "model": model_id,
                    "fingerprint": state["fingerprint"], "retrieval": cfg.retrieval.to_dict(),
                    "min_score": cfg.min_score}
+        plain = bool(body.get("plain"))
+        if plain:
+            setting["plain"] = True
         key = cache_key(question, **setting)
         if (hit := answers.get(key)) is not None:
             metrics.inc("cache_hits_total")
@@ -1070,7 +1136,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
                 with admission.slot():
                     for item in answer_question_stream(
                             question, state["pipeline"], stream_llm, k=k, guard=guard(),
-                            repair_llm=llm, language=body.get("language")):
+                            repair_llm=llm, plain=plain, language=body.get("language")):
                         kind = item["type"]
                         if kind == "token" and first_token:
                             first_token = False
@@ -1084,8 +1150,8 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
                             record_cost(ans)
                             answer_id = uuid.uuid4().hex[:10]
                             ans.question = asked
-                            out = thread_fields(serialize(ans, answer_id=answer_id), asked,
-                                                question, parent)
+                            out = thread_fields(serialize(ans, answer_id=answer_id, plain=plain),
+                                                asked, question, parent)
                             if cfg.verify_live and not ans.refused:
                                 live_statuses(ans, out)
                             answers.put(key, out)
@@ -1155,6 +1221,11 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
             return JSONResponse({"error": "not found or expired"}, status_code=404, headers=vary)
         return JSONResponse(stored, headers=vary)
 
+    async def legal_aid(request: Request):
+        """Hotlines and the 64 district legal aid offices, for the help box on the page."""
+        return JSONResponse(legal_aid_directory(),
+                            headers={"cache-control": "public, max-age=86400"})
+
     async def index_page(request: Request):
         return FileResponse(STATIC / "index.html")
 
@@ -1174,11 +1245,38 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
             return JSONResponse(data)
         return HTMLResponse(render_coverage(data))
 
+    async def accuracy_page(request: Request):
+        # Rendered from the same scorecard.json as docs/ACCURACY.md, so the page,
+        # the README and the file served at /static/scorecard.json cannot disagree.
+        return HTMLResponse(scorecard.html_page(scorecard.load()))
+
+    async def sources_page(request: Request):
+        return FileResponse(STATIC / "sources.html")
+
+    async def acts(request: Request):
+        """Every act the answers can cite: its official page, how many sections,
+        the newest amendment our copy reflects, and when the copy was taken."""
+        try:
+            await run_in_threadpool(build)
+        except Exception as e:
+            return JSONResponse({"error": f"index not loaded: {e}"}, status_code=503)
+        if "acts" not in state or state.get("acts_for") != state.get("fingerprint"):
+            built = index_built_at(cfg.index)
+            state["acts"] = await run_in_threadpool(acts_table, state["records"] or [], built)
+            state["acts_for"] = state.get("fingerprint")
+        rows = state["acts"]
+        return JSONResponse({"index_built_at": index_age()["index_built_at"], "count": len(rows),
+                             "source": "http://bdlaws.minlaw.gov.bd", "acts": rows},
+                            headers={"cache-control": "public, max-age=3600"})
+
+    async def about_page(request: Request):
+        return FileResponse(STATIC / "about.html")
+
     async def robots(request: Request):
         # Shared answers hold what visitors asked; the API is not content.
-        return PlainTextResponse("User-agent: *\nAllow: /$\nAllow: /privacy\nAllow: /coverage\n"
+        return PlainTextResponse("User-agent: *\nAllow: /$\nAllow: /about\nAllow: /privacy\nAllow: /accuracy\nAllow: /coverage\n"
                                  "Allow: /static/\n"
-                                 "Disallow: /a/\nDisallow: /ask\nDisallow: /search\n"
+                                 "Allow: /sources\nDisallow: /a/\nDisallow: /ask\nDisallow: /search\n"
                                  "Disallow: /metrics\nDisallow: /stats\n")
 
     async def manifest(request: Request):
@@ -1196,8 +1294,12 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
     routes: list[Route | Mount] = [
         Route("/", index_page),
         Route("/privacy", privacy_page),
+        Route("/about", about_page),
         Route("/terms", privacy_page),
         Route("/coverage", coverage_page),
+        Route("/accuracy", accuracy_page),
+        Route("/sources", sources_page),
+        Route("/acts", acts),
         Route("/robots.txt", robots),
         Route("/manifest.webmanifest", manifest),
         Route("/health", health),
@@ -1210,6 +1312,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         Route("/ask", ask, methods=["POST"]),
         Route("/ask/stream", ask_stream, methods=["POST"]),
         Route("/feedback", feedback, methods=["POST"]),
+        Route("/legal-aid", legal_aid),
         Route("/a/{answer_id}", permalink),
     ]
     if STATIC.exists():
