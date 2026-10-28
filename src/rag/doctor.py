@@ -253,6 +253,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--model", help="embedding model (default: $BDRAG_MODEL or BAAI/bge-m3)")
     args = ap.parse_args(argv)
     checks = run(args.index, args.model)
+    # A plain Windows console (cp1252/cp437) cannot print the emoji or a dash:
+    # use ASCII marks there and replace anything else it cannot show.
+    enc = (getattr(sys.stdout, "encoding", "") or "").lower()
+    if "utf" not in enc:
+        ICON.update({OK: "[ok]  ", WARN: "[warn]", FAIL: "[FAIL]"})
+        try:
+            sys.stdout.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
     for c in checks:
         print(c.line())
     failed = [c for c in checks if c.status == FAIL]
