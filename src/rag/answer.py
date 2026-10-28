@@ -19,7 +19,12 @@ from .evidence import (
 )
 from .guardrails import GuardConfig, repair_instruction, run_checks, support_gate
 from .llm import LLM, LLMError
-from .prompts import ACTIVE_ANSWER_SYSTEM, GENERAL_GUIDANCE_V1
+from .prompts import (
+    ACTIVE_ANSWER_SYSTEM,
+    ACTIVE_PLAIN_SYSTEM,
+    GENERAL_GUIDANCE_V1,
+    GENERAL_GUIDANCE_V1_PLAIN,
+)
 from .scope import (
     GENERAL_LABEL,
     LEGAL_AID_NOTICE,
@@ -32,6 +37,8 @@ from .store import Hit
 
 SYSTEM = ACTIVE_ANSWER_SYSTEM.text
 SYSTEM_ID = ACTIVE_ANSWER_SYSTEM.id
+PLAIN_SYSTEM = ACTIVE_PLAIN_SYSTEM.text
+PLAIN_SYSTEM_ID = ACTIVE_PLAIN_SYSTEM.id
 
 REFUSAL_MARK = "NOT_FOUND"
 CITE_RE = re.compile(r"\[(\d{1,2})\]")
@@ -184,7 +191,7 @@ def build_prompt(question: str, hits: list[Hit], sandwich: bool = True) -> str:
     )
 
 
-def general_guidance(question: str, llm: LLM) -> str | None:
+def general_guidance(question: str, llm: LLM, plain: bool = False) -> str | None:
     """General orientation for a question the corpus cannot answer, labelled as such.
 
     The label goes first and the legal-aid note last, added here rather than
@@ -194,8 +201,9 @@ def general_guidance(question: str, llm: LLM) -> str | None:
     lang = "bn" if detect_lang(question) == "bn" else "en"
     reminder = ("প্রশ্নটি বাংলায়, তাই উত্তরও বাংলায় দিন।" if lang == "bn"
                 else "The question is in English; answer in English.")
+    prompt = GENERAL_GUIDANCE_V1_PLAIN if plain else GENERAL_GUIDANCE_V1
     try:
-        text = llm(GENERAL_GUIDANCE_V1.text, f"{wrap_untrusted(question)}\n\n{reminder}")
+        text = llm(prompt.text, f"{wrap_untrusted(question)}\n\n{reminder}")
     except LLMError:
         return None
     # No excerpts were shown, so a [n] can only be invented; a NOT_FOUND here is noise.
@@ -206,18 +214,20 @@ def general_guidance(question: str, llm: LLM) -> str | None:
     return GENERAL_LABEL[lang] + text + LEGAL_AID_NOTICE[lang]
 
 
-def with_general_guidance(answer: Answer, llm: LLM | None, guard: GuardConfig) -> Answer:
+def with_general_guidance(answer: Answer, llm: LLM | None, guard: GuardConfig,
+                          plain: bool = False) -> Answer:
     """Swap a refusal for general guidance when the service asks for it."""
     if not (guard.general_fallback and llm and answer.refused):
         return answer
     t0 = time.perf_counter()
-    text = general_guidance(answer.question, llm)
+    text = general_guidance(answer.question, llm, plain=plain)
     if text is None:
         return answer
     return Answer(answer.question, text, answer.hits, refused=False, abstained=answer.abstained,
                   latency_s=answer.latency_s + time.perf_counter() - t0,
                   checks={**answer.checks, "confidence": None, "general_guidance": True,
-                          "grounded_reply": answer.text, "prompt_id": GENERAL_GUIDANCE_V1.id},
+                          "grounded_reply": answer.text,
+                          "prompt_id": (GENERAL_GUIDANCE_V1_PLAIN if plain else GENERAL_GUIDANCE_V1).id},
                   llm_calls=answer.llm_calls + 1, general=True)
 
 
@@ -229,7 +239,8 @@ def check_citations(text: str, n_hits: int) -> tuple[list[int], list[int]]:
 
 
 def answer_question(question: str, retriever, llm: LLM, k: int = 5, sandwich: bool = True,
-                    guard: GuardConfig | None = None, **search_kw) -> Answer:
+                    guard: GuardConfig | None = None, plain: bool = False,
+                    **search_kw) -> Answer:
     """Retrieve, answer, check, repair once if needed.
 
     This is the streaming path with the stream collapsed to a single chunk —
@@ -240,7 +251,7 @@ def answer_question(question: str, retriever, llm: LLM, k: int = 5, sandwich: bo
 
     final: Answer | None = None
     for event in answer_question_stream(question, retriever, one_shot, k=k, sandwich=sandwich,
-                                        guard=guard, repair_llm=llm, **search_kw):
+                                        guard=guard, repair_llm=llm, plain=plain, **search_kw):
         if event["type"] == "final":
             final = event["answer"]
     assert final is not None                      # the generator always ends with "final"
@@ -249,8 +260,11 @@ def answer_question(question: str, retriever, llm: LLM, k: int = 5, sandwich: bo
 
 def answer_question_stream(question: str, retriever, stream_llm, k: int = 5,
                            sandwich: bool = True, guard: GuardConfig | None = None,
-                           repair_llm: LLM | None = None, **search_kw):
+                           repair_llm: LLM | None = None, plain: bool = False, **search_kw):
     """Same contract as answer_question, but yields progress as it happens.
+
+    plain=True answers with the plain-language prompt (prompts.PLAIN_RULE): same
+    rules and checks, everyday words.
 
     Yields dicts: {"type": "status"|"sources"|"token"|"final", ...}. The checks
     can only run on a complete answer, so the guardrail verdict arrives with
@@ -258,6 +272,7 @@ def answer_question_stream(question: str, retriever, stream_llm, k: int = 5,
     the user that in the UI rather than pretending the first draft was final.
     """
     guard = guard or GuardConfig()
+    system, system_id = (PLAIN_SYSTEM, PLAIN_SYSTEM_ID) if plain else (SYSTEM, SYSTEM_ID)
     t0 = time.perf_counter()
     flags = classify_request(question)
     if flags["off_topic"]:
@@ -277,7 +292,7 @@ def answer_question_stream(question: str, retriever, stream_llm, k: int = 5,
                         latency_s=time.perf_counter() - t0, checks={"scope": flags})
         if guard.general_fallback and repair_llm:
             yield {"type": "status", "stage": "general_guidance"}
-        yield {"type": "final", "answer": with_general_guidance(answer, repair_llm, guard)}
+        yield {"type": "final", "answer": with_general_guidance(answer, repair_llm, guard, plain)}
         return
 
     ordered = reorder_sandwich(hits) if sandwich and len(hits) > 2 else hits
@@ -286,7 +301,7 @@ def answer_question_stream(question: str, retriever, stream_llm, k: int = 5,
     yield {"type": "status", "stage": "answering"}
     prompt = build_prompt(question, ordered, sandwich=False)
     pieces = []
-    for piece in stream_llm(SYSTEM, prompt):
+    for piece in stream_llm(system, prompt):
         pieces.append(piece)
         yield {"type": "token", "text": piece}
     text = normalize_answer("".join(pieces))
@@ -300,7 +315,7 @@ def answer_question_stream(question: str, retriever, stream_llm, k: int = 5,
     repaired = False
     if not refused and checks["failures"] and guard.repair and repair_llm:
         yield {"type": "status", "stage": "repairing", "failures": checks["failures"]}
-        retry = normalize_answer(repair_llm(SYSTEM, f"{prompt}\n\n--- your previous answer ---\n{text}\n\n"
+        retry = normalize_answer(repair_llm(system, f"{prompt}\n\n--- your previous answer ---\n{text}\n\n"
                                                     f"{repair_instruction(checks)}"))
         repaired = True
         retry_refused = retry.startswith(REFUSAL_MARK)
@@ -319,9 +334,9 @@ def answer_question_stream(question: str, retriever, stream_llm, k: int = 5,
     answer = Answer(
         question=question, text=text, hits=ordered, cited=cited, invalid_citations=invalid,
         refused=refused, latency_s=time.perf_counter() - t0,
-        checks={**checks, "confidence": conf, "scope": flags, "prompt_id": SYSTEM_ID},
+        checks={**checks, "confidence": conf, "scope": flags, "prompt_id": system_id},
         repaired=repaired, llm_calls=2 if repaired else 1)
     if refused and guard.general_fallback and repair_llm:
         # The streamed draft was a refusal; the final text replaces it.
         yield {"type": "status", "stage": "general_guidance"}
-    yield {"type": "final", "answer": with_general_guidance(answer, repair_llm, guard)}
+    yield {"type": "final", "answer": with_general_guidance(answer, repair_llm, guard, plain)}

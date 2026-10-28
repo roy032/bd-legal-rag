@@ -29,6 +29,52 @@ open is in [IMPROVEMENTS.md](IMPROVEMENTS.md).
   general guidance), the closest three sections are listed under "Closest sections found
   (none answers this)", so a reader can see the gap for themselves.
 
+### Bangla first, free, private: said plainly, and checked
+- **The privacy claim is computed.** `service/privacy.py` works out from the running
+  settings whether a question could leave the machine: an answering model is local only
+  when its URL is a loopback address, so `compat` pointed at a remote server or
+  `OLLAMA_HOST` on another computer now count as outside (the model picker used to call
+  every `compat` model "on this machine"). A remote `REDIS_URL` holds questions too;
+  tracing and the live citation check are listed but send no question text. `/health`
+  reports `private`, `outbound` and `same_machine`.
+- **The home page says it only when it is true:** "Runs on your computer: your question
+  never leaves it" when the browser is on the same machine, "no outside AI company sees
+  your question" on a server, and the provider's name when a hosted model is on. Before
+  this, a hosted model that was the only model showed no notice at all, although the
+  privacy page promised one.
+- **Bangla first.** The page opens in Bangla unless the visitor picked English; the
+  eyebrow reads "বাংলায় প্রশ্ন, বাংলায় উত্তর".
+- **`/about`**, in Bangla then English: what Bangla first, free and private mean here,
+  the path a question takes on a laptop, what the internet is still used for (setup
+  downloads, the official-text links you click), and what the assistant cannot do.
+- **`SETUP_WINDOWS.bat`**: one double-click installs Python and Ollama with winget if
+  missing, creates `.venv`, pulls gemma4:e4b, builds the index (a starter set of the 11
+  Acts the topic table relies on, the full corpus, or a download) and starts the
+  assistant. **`START_WINDOWS.bat`** / **`bdrag start`** serve on 127.0.0.1 only with the
+  local model, drop every setting that sends something off the machine, set
+  `HF_HUB_OFFLINE=1` once the embedding model is cached, start `ollama serve` if needed,
+  and open the browser when the service is ready.
+- `bdrag doctor` has a privacy line: where questions would go with the current settings.
+- The privacy page's "Who else sees your question" paragraph now matches this (needs the
+  owner's review before launch).
+
+### What to do next, plain language, legal-aid contacts
+- **A "What to do next" checklist** under every answer about a situation: the cited
+  steps the model wrote under "What you can do", as tick boxes kept in the browser,
+  its practical tips (or three fixed ones), and who to call. Read out of the checked
+  answer by `rag/nextsteps.py`, so it costs no extra model call; the API returns it as
+  `next_steps` and permalinks keep it. Lookups and refusals get none.
+- **Plain language / সহজ ভাষা** switch beside the Ask button: `plain: true` selects
+  `answer-system/v6-plain`, the v6 prompt plus one rule for short sentences and
+  everyday words, with the same citation checks. A hand-written glossary of 24 legal
+  terms in both languages explains the words the answer uses. Cached apart from
+  normal answers.
+- **Legal-aid contacts**: 16430 with every checklist, plus the hotline that fits the
+  situation (999, 109, 1098, 333, 16121, 16357), chosen from the topic table in code,
+  never by the model. `GET /legal-aid` and a district picker for all 64 district legal
+  aid offices. The numbers still need a person to check them before launch:
+  [docs/LEGAL_AID.md](docs/LEGAL_AID.md).
+
 ### Lawyer review of the answers
 - **`bdrag review`**, the kit for the launch audit's top open item: nobody qualified had
   read the answers. `bdrag review sheet <run>.answers.json --n 50` takes a sample balanced

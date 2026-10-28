@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="bn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>পরিচিতি · About · বাংলাদেশ আইন সহায়ক</title>
+<meta name="description" content="A Bangla-first assistant for the laws of Bangladesh: free, open source, and able to run entirely on your own computer, so your question never leaves it.">
+<meta name="theme-color" content="#0b4f3a">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="preload" href="/static/fonts/noto-sans-bengali-bengali-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/static/app.css">
+<script>
+  try {
+    const t = localStorage.getItem("bdrag-theme"); if (t) document.documentElement.dataset.theme = t;
+  } catch (e) {}
+</script>
+<style>
+  .legal { max-width: 760px; margin: 0 auto; padding: 32px 16px 64px; line-height: 1.65; }
+  .legal h1 { font-size: clamp(26px, 3.4vw, 36px); margin: 0 0 8px; line-height: 1.25; }
+  .legal h2 { font-size: 20px; margin: 32px 0 8px; }
+  .legal .lead { font-size: 18px; color: var(--muted); margin: 0 0 20px; }
+  .legal ul, .legal ol { padding-left: 1.3em; }
+  .legal li { margin: 6px 0; }
+  .legal nav { display: flex; gap: 8px 18px; flex-wrap: wrap; margin: 0 0 16px; font-size: 15px; }
+  .legal [lang=bn] { letter-spacing: 0; }
+  .legal hr { border: 0; border-top: 1px solid var(--line); margin: 40px 0; }
+  .legal pre { overflow-x: auto; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; font-size: 14px; }
+  .legal .pillars { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 20px 0; padding: 0; list-style: none; }
+  .legal .pillars li { margin: 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; }
+  .pillars b { display: block; font-size: 17px; margin-bottom: 4px; }
+  .status { margin: 20px 0; padding: 14px 16px; border: 1px solid var(--line); border-left: 4px solid var(--line); border-radius: 10px; }
+  .status.ok { border-left-color: #1a7f55; }
+  .status.out { border-left-color: #b26a00; }
+  .status p { margin: 0; }
+  .status ul { margin: 6px 0 0; }
+</style>
+</head>
+<body>
+<main class="legal">
+  <nav aria-label="Page links"><a href="/">← বাংলাদেশ আইন সহায়ক</a> <a href="#en" lang="en">Read in English</a> <a href="/privacy">গোপনীয়তা ও শর্ত</a></nav>
+
+  <h1>বাংলায় আইনের প্রশ্ন। বিনামূল্যে। আপনার নিজের কম্পিউটারে।</h1>
+  <p class="lead">বাংলাদেশের আইন নিয়ে বাংলায় প্রশ্ন করুন, বাংলায় উত্তর পান, প্রতিটি কথার পাশে আইনের ধারার উল্লেখসহ। কোনো ফি নেই, অ্যাকাউন্ট নেই, আর নিজের কম্পিউটারে চালালে আপনার প্রশ্ন সেখান থেকে কোথাও যায় না।</p>
+
+  <div class="status" id="status-bn" role="status" hidden></div>
+
+  <ul class="pillars">
+    <li><b>বাংলা আগে</b>বাংলা, ইংরেজি বা রোমান হরফে বাংলা (“dhara 302 e ki ache”) — যেভাবে লিখুন, খোঁজা হয় বাংলা ও ইংরেজি দুই পাঠেই। উত্তর আসে আপনার প্রশ্নের ভাষায়।</li>
+    <li><b>বিনামূল্যে</b>কোনো পেইড এআই সেবা বা এপিআই কী লাগে না। উন্মুক্ত মডেল (gemma) একটি সাধারণ ল্যাপটপের সিপিইউতে চলে। কোড MIT লাইসেন্সে উন্মুক্ত।</li>
+    <li><b>গোপনীয়</b>নিজের কম্পিউটারে চালালে প্রশ্ন, খোঁজ ও উত্তর লেখা — সবই সেখানেই হয়। কোনো বিজ্ঞাপন, ট্র্যাকার বা কুকি নেই।</li>
+  </ul>
+
+  <h2 id="private-bn">আপনার প্রশ্ন কোথায় যায়</h2>
+  <p>নিজের কম্পিউটারে চালালে প্রশ্নের পুরো পথ এই কম্পিউটারের ভেতরেই:</p>
+  <ol>
+    <li>ব্রাউজার প্রশ্নটি পাঠায় এই কম্পিউটারে চলা সেবায় (127.0.0.1)।</li>
+    <li>ফোন, এনআইডি ও কার্ড নম্বর এবং ইমেইল সঙ্গে সঙ্গে মুছে চিহ্ন বসানো হয়।</li>
+    <li>এই কম্পিউটারে রাখা ভাষা-মডেল (bge-m3) প্রশ্নটিকে সংখ্যায় রূপ দেয়, আর ডিস্কে রাখা আইনের সূচিতে মিল খোঁজা হয়।</li>
+    <li>মিলে যাওয়া ধারাগুলো যায় এই কম্পিউটারেই চলা Ollama-র মডেলে (gemma4:e4b), যা উত্তর লেখে।</li>
+  </ol>
+  <p>পাতাটি নিজেও অন্য কোনো সাইটে যোগাযোগ করতে পারে না: ফন্টসহ সবকিছু এই সেবা থেকেই আসে, আর ব্রাউজারকে নিয়ম (Content-Security-Policy) দিয়ে অন্য সাইটে সংযোগ নিষেধ করা থাকে।</p>
+  <p>ইন্টারনেট লাগে শুধু শুরুতে একবার: প্রোগ্রাম, মডেল আর আইনের পাঠ নামাতে। এসব অনুরোধে আপনার কোনো প্রশ্ন থাকে না। উত্তরের পাশে “সরকারি পাঠ” লিংকে ক্লিক করলে অবশ্য সরকারি সাইট খুলবে।</p>
+  <p><strong>এই দাবি অনুমান নয়।</strong> সেবাটি নিজের সেটিংস দেখে হিসাব করে প্রশ্ন বাইরে যেতে পারে কি না, এবং কেবল তখনই প্রথম পাতায় “প্রশ্ন বাইরে যায় না” লেখে। কেউ বাইরের মডেল (যেমন Groq বা Gemini) চালু করলে পাতায় সেই সেবাদাতার নাম দেখানো হয়। <code>bdrag doctor</code> চালালেও একই হিসাব দেখা যায়।</p>
+  <p><strong>অন্য কেউ চালালে:</strong> কোনো ওয়েবসাইটে এই সহায়ক ব্যবহার করলে আপনার প্রশ্ন সেই সাইটের সার্ভারে যায়। সেখানে কী রাখা হয় ও কতদিন, তা <a href="/privacy#bn">গোপনীয়তা</a> পাতায় লেখা আছে।</p>
+
+  <h2>নিজের কম্পিউটারে চালান</h2>
+  <p>Windows-এ: প্রকল্পটি <a href="https://github.com/roy032/bd-legal-rag" rel="noopener">GitHub থেকে</a> নামিয়ে <code>SETUP_WINDOWS.bat</code>-এ ডাবল-ক্লিক করুন। এটি Python ও Ollama না থাকলে বসায়, মডেল নামায়, আইনের সূচি তৈরি বা ডাউনলোড করে, তারপর ব্রাউজারে এই সহায়ক খোলে। পরে চালাতে <code>START_WINDOWS.bat</code>। ৮ জিবি র‍্যাম (১৬ জিবি হলে ভালো) ও প্রায় ২০ জিবি ফাঁকা জায়গা লাগে।</p>
+
+  <h2>যা এটি পারে না</h2>
+  <ul>
+    <li>শুধু Laws of Bangladesh সাইটে প্রকাশিত আইন আছে। আদালতের রায়, বিধিমালা, এসআরও ও গেজেট প্রজ্ঞাপন এখনো নেই।</li>
+    <li>এটি আইনি পরামর্শ নয়। নিজের মামলার জন্য সরকারের বিনামূল্যের আইনগত সহায়তা হটলাইন <a href="tel:16430">১৬৪৩০</a>-এ কল করুন।</li>
+    <li>ল্যাপটপের সিপিইউতে একটি উত্তর লিখতে কিছুটা সময় লাগে; মিলে যাওয়া ধারাগুলো আগেই দেখা যায়।</li>
+  </ul>
+
+  <hr>
+
+  <section id="en" lang="en">
+    <h1>Bangladeshi law, in Bangla. Free. On your own computer.</h1>
+    <p class="lead">Ask about the laws of Bangladesh in Bangla and get the answer in Bangla, every claim cited to the section of the Act. No fee, no account, and when you run it on your own computer your question never leaves it.</p>
+
+    <div class="status" id="status-en" role="status" hidden></div>
+
+    <ul class="pillars">
+      <li><b>Bangla first</b>Write in Bangla, English or romanised Bangla (“dhara 302 e ki ache”); both the Bangla and English texts are searched. The answer comes back in the language you asked in.</li>
+      <li><b>Free</b>No paid AI service and no API key. An open model (gemma) runs on an ordinary laptop CPU. The code is open source under the MIT licence.</li>
+      <li><b>Private</b>Run on your own computer, the question, the search and the answer all stay on it. No ads, no trackers, no cookies.</li>
+    </ul>
+
+    <h2 id="private">Where your question goes</h2>
+    <p>On your own computer, the whole path stays inside it:</p>
+    <ol>
+      <li>The browser sends the question to the service on this computer (127.0.0.1).</li>
+      <li>Phone, NID and card numbers and email addresses are replaced with placeholders straight away.</li>
+      <li>An embedding model stored on this computer (bge-m3) turns the question into numbers, and the law index on disk is searched.</li>
+      <li>The matching sections go to the model running in Ollama on this computer (gemma4:e4b), which writes the answer.</li>
+    </ol>
+    <p>The page itself cannot contact other sites: everything, fonts included, is served by this service, and its Content-Security-Policy tells the browser not to connect anywhere else.</p>
+    <p>The internet is needed once, at setup, to download the software, the models and the law text. None of those requests carries a question. Clicking an “Official text” link next to an answer does open the government site.</p>
+    <p><strong>This is checked, not assumed.</strong> The service works out from its own settings whether a question could leave the machine, and only then does the home page say it does not. If someone turns on a hosted model (Groq or Gemini, say), the page names that provider instead. <code>bdrag doctor</code> prints the same check.</p>
+    <p><strong>When someone else runs it:</strong> on a website, your question goes to that site's server. What is kept there, and for how long, is on the <a href="/privacy">privacy</a> page.</p>
+
+    <h2>Run it yourself</h2>
+    <p>On Windows: download the project <a href="https://github.com/roy032/bd-legal-rag" rel="noopener">from GitHub</a> and double-click <code>SETUP_WINDOWS.bat</code>. It installs Python and Ollama if they are missing, pulls the model, builds or downloads the law index, then opens the assistant in your browser. Later, <code>START_WINDOWS.bat</code> starts it again. It needs 8 GB of RAM (16 GB is more comfortable) and about 20 GB of free disk.</p>
+    <p>On macOS or Linux, see the README: <code>pip install -e ".[serve,embed]"</code>, <code>ollama pull gemma4:e4b</code>, <code>bdrag serve --host 127.0.0.1</code>.</p>
+
+    <h2>What it cannot do</h2>
+    <ul>
+      <li>It covers the Acts on the Laws of Bangladesh website only. Court decisions, rules, SROs and gazette notifications are not included yet.</li>
+      <li>It is not legal advice. For your own case, call the government's free legal aid hotline <a href="tel:16430">16430</a>.</li>
+      <li>On a laptop CPU an answer takes a while to write; the matching sections appear first.</li>
+    </ul>
+  </section>
+</main>
+<script>
+// What this copy is actually doing, from /health (service/privacy.py), in both languages.
+(async () => {
+  const esc = v => String(v ?? "").replace(/[&<>"']/g, c =>
+    ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+  let d;
+  try { d = await (await fetch("/health")).json(); } catch (e) { return; }
+  if (typeof d.private !== "boolean") return;
+  const model = d.llm && d.llm !== "none" ? esc(d.llm_model ? `${d.llm} · ${d.llm_model}` : d.llm) : "";
+  const sends = (d.outbound || []).map(o => `<li>${esc(o.where)}: ${esc(o.sends)}</li>`).join("");
+  const text = {
+    bn: d.private
+      ? `<p><strong>এই কপি:</strong> ${d.same_machine ? "আপনার কম্পিউটারেই চলছে, আপনার প্রশ্ন বাইরে কোথাও যায় না।" : "বাইরের কোনো এআই সেবাদাতা আপনার প্রশ্ন দেখে না; উত্তর লেখা হয় এই সার্ভারেই।"} ${model ? `উত্তর লেখার মডেল: ${model}।` : ""}</p>`
+      : `<p><strong>এই কপি:</strong> আপনার প্রশ্ন বাইরে পাঠানো হয়।</p>`,
+    en: d.private
+      ? `<p><strong>This copy:</strong> ${d.same_machine ? "running on your computer; your question does not leave it." : "no outside AI provider sees your question; answers are written on this server."} ${model ? `Answering model: ${model}.` : ""}</p>`
+      : `<p><strong>This copy:</strong> your question is sent outside this server.</p>`,
+  };
+  for (const lang of ["bn", "en"]) {
+    const box = document.getElementById("status-" + lang);
+    box.innerHTML = text[lang] + (sends ? `<ul lang="en">${sends}</ul>` : "");
+    box.classList.add(d.private ? "ok" : "out");
+    box.hidden = false;
+  }
+})();
+</script>
+</body>
+</html>
