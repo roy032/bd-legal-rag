@@ -69,6 +69,10 @@ const T = {
     l_theme: "Switch colour theme", l_tabs: "Example questions by area of law", l_progress: "Progress",
     l_helpful: "Helpful", l_nothelpful: "Not helpful", l_aid: "Free legal aid", l_feedback: "Feedback",
     commentlabel: "What was wrong with this answer?", l_source: n => `Source ${n}`,
+    plain: "Plain language", ns_title: "What to do next", ns_copy: "Copy checklist", ns_tips: "Practical tips",
+    ns_help: "Free help", ns_note: "Steps with a number in brackets come from the cited section. Tips and phone numbers are general and are not taken from the law.",
+    ns_generic: "General tips", gloss: "Words in this answer, explained", district: "Your district's legal aid office",
+    district_pick: "Choose your district…", office_online: "Office contacts on nlaso.gov.bd", plainbadge: "plain language",
   },
   bn: {
     brand: "বাংলাদেশ আইন সহায়ক", brand2: "Bangladesh Law Assistant",
@@ -122,6 +126,10 @@ const T = {
     l_theme: "রঙের থিম বদলান", l_tabs: "আইনের বিষয় অনুযায়ী উদাহরণ প্রশ্ন", l_progress: "অগ্রগতি",
     l_helpful: "সহায়ক", l_nothelpful: "সহায়ক নয়", l_aid: "বিনামূল্যে আইনি সহায়তা", l_feedback: "মতামত",
     commentlabel: "এই উত্তরে কী ভুল ছিল?", l_source: n => `সূত্র ${toBn(n)}`,
+    plain: "সহজ ভাষা", ns_title: "এখন কী করবেন", ns_copy: "তালিকা কপি করুন", ns_tips: "ব্যবহারিক পরামর্শ",
+    ns_help: "বিনামূল্যে সহায়তা", ns_note: "বন্ধনীতে নম্বরসহ ধাপগুলো উল্লেখিত ধারা থেকে নেওয়া। পরামর্শ ও ফোন নম্বরগুলো সাধারণ তথ্য, আইনের পাঠ থেকে নয়।",
+    ns_generic: "সাধারণ পরামর্শ", gloss: "এই উত্তরের আইনি শব্দের সহজ মানে", district: "আপনার জেলার লিগ্যাল এইড অফিস",
+    district_pick: "জেলা বেছে নিন…", office_online: "অফিসের যোগাযোগ nlaso.gov.bd-তে", plainbadge: "সহজ ভাষা",
   },
 };
 let LANG = document.documentElement.lang === "bn" ? "bn" : "en";
@@ -166,6 +174,7 @@ function applyLang(lang) {
   document.querySelectorAll(".seg [data-lang]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.lang === LANG)));
   renderTabs();
   renderHistory();
+  renderDistricts();
   if (LAST) render(LAST.data, LAST.opts);
 }
 document.querySelectorAll(".seg [data-lang]").forEach(b => { b.onclick = () => applyLang(b.dataset.lang); });
@@ -247,6 +256,15 @@ function showHosted() {
 }
 $("model").onchange = () => { store.set("bdrag-model", $("model").value); showHosted(); };
 const chosenModel = () => $("modelwrap").hidden ? undefined : $("model").value;
+
+// Plain language: short sentences and everyday words, legal terms explained. Remembered.
+let PLAIN = store.get("bdrag-plain") === "1";
+$("plain").setAttribute("aria-pressed", String(PLAIN));
+$("plain").onclick = () => {
+  PLAIN = !PLAIN;
+  store.set("bdrag-plain", PLAIN ? "1" : "0");
+  $("plain").setAttribute("aria-pressed", String(PLAIN));
+};
 
 // What is loaded: corpus size for the trust line, and a banner when the model is down.
 let CORPUS = null, OUTSIDE = "";
@@ -418,12 +436,15 @@ function render(d, opts = {}) {
     setNotice("warn", t("notfound"), " " + t("gnote"));
     $("answer").innerHTML = "";
   } else if (d.answer || d.error) {
-    $("answer").innerHTML = md(d.answer || d.error || "");
+    // The steps and tips move to the checklist below, so the answer shows the rest.
+    $("answer").innerHTML = md((d.next_steps && d.next_steps.body) || d.answer || d.error || "");
     // Served from the paraphrase cache: say which question it answered.
     if (d.cache_match) setNotice("warn", t("similar"), " " + t("similar2", d.cache_match.question));
   }
   $("guidance").hidden = !d.general_guidance;
   $("gtext").innerHTML = d.general_guidance ? md(d.answer || "") : "";
+  renderNext(d.degraded ? null : d.next_steps, d.id);
+  renderGlossary(d.glossary || []);
 
   if (!d.degraded) {
     const cited = new Set((d.sources || []).map(s => s.n));
@@ -434,6 +455,7 @@ function render(d, opts = {}) {
   steps(null);                 // finished: the badges below say what happened
 
   $("badges").innerHTML = "";
+  if (d.plain) badge(t("plainbadge"));
   if (d.repaired) badge(t("repaired"), "warn");
   (d.failures || []).forEach(f => badge(t("fail")[f] || f.replace(/_/g, " "), "bad"));
   if (d.cached && !opts.fromPermalink) badge(t("cached"));
@@ -466,6 +488,77 @@ function render(d, opts = {}) {
     try { history.replaceState(null, "", "/a/" + currentId); } catch (e) {}
   }
 }
+
+// ------------------------------------------------------------------ what to do next
+// A checklist for answers about a situation: the cited steps from the answer, practical
+// tips, and who to call. Ticks are kept in this browser, per answer.
+const doneKey = id => "bdrag-done-" + id;
+let NEXT = null;
+function renderNext(ns, id = null) {
+  NEXT = ns && (ns.steps.length || ns.help.length) ? {...ns, id} : null;
+  $("nextsteps").hidden = !NEXT;
+  if (!NEXT) { $("nslist").innerHTML = $("nstips").innerHTML = $("nshelp").innerHTML = ""; return; }
+  const bn = ns.lang === "bn";
+  let done = [];
+  try { done = JSON.parse(id ? store.get(doneKey(id), "[]") : "[]") || []; } catch (e) {}
+  $("nslist").hidden = !ns.steps.length;
+  $("nslist").innerHTML = ns.steps.map((s, i) =>
+    `<li><input type="checkbox" id="ns-${i}" data-i="${i}"${done.includes(i) ? " checked" : ""}>` +
+    `<label for="ns-${i}">${inline(esc(s.text), bn)}</label></li>`).join("");
+  $("nstipswrap").hidden = !ns.tips.length;
+  $("nstipswrap").querySelector("h4").textContent = t(ns.generic_tips ? "ns_generic" : "ns_tips");
+  $("nstips").innerHTML = ns.tips.map(x => `<li>${esc(x)}</li>`).join("");
+  $("nshelp").innerHTML = ns.help.map(c =>
+    `<li><a class="phone sm" href="tel:${esc(c.phone)}">${esc(bn ? toBn(c.phone) : c.phone)}</a>` +
+    `<span><b>${esc(c.name)}</b><small>${esc(c.when)}</small></span></li>`).join("");
+}
+$("nslist").addEventListener("change", () => {
+  if (!NEXT || !NEXT.id) return;
+  const done = [...$("nslist").querySelectorAll("input:checked")].map(x => +x.dataset.i);
+  store.set(doneKey(NEXT.id), JSON.stringify(done));
+});
+function checklistText() {
+  if (!NEXT) return "";
+  return [t("ns_title") + ":",
+    ...NEXT.steps.map((s, i) => `${i + 1}. ${s.text}`),
+    ...NEXT.tips.map(x => `- ${x}`),
+    t("ns_help") + ":", ...NEXT.help.map(c => `${c.phone}: ${c.name}`)].join("\n");
+}
+$("nscopy").onclick = () => copy(checklistText(), t("copied"));
+
+function renderGlossary(terms) {
+  $("glosswrap").hidden = !terms.length;
+  $("gloss").innerHTML = terms.map(x => `<dt>${esc(x.term)}</dt><dd>${esc(x.plain)}</dd>`).join("");
+}
+
+// The district legal aid office: 64 districts, chosen once and remembered.
+let AID = null;
+function showOffice() {
+  const d = AID && AID.districts.find(x => x.en === $("district").value);
+  store.set("bdrag-district", d ? d.en : "");
+  if (!d) { $("office").innerHTML = ""; return; }
+  const name = LANG === "bn" ? d.bn : d.en;
+  $("office").innerHTML = `<b>${esc(AID.office[LANG].replace("{district}", name))}</b>` +
+    (d.phone ? ` · <a href="tel:${esc(d.phone)}">${esc(d.phone)}</a>` : "") +
+    `<br>${esc(AID.office_how[LANG])} <a href="${safeUrl(AID.website)}" target="_blank" rel="noopener">${esc(t("office_online"))} ↗</a>`;
+}
+function renderDistricts() {
+  if (!AID) return;
+  const keep = $("district").value || store.get("bdrag-district", "");
+  const groups = {};
+  AID.districts.forEach(d => (groups[d.division] = groups[d.division] || []).push(d));
+  $("district").innerHTML = `<option value="">${esc(t("district_pick"))}</option>` +
+    Object.entries(groups).map(([div, ds]) => `<optgroup label="${esc(div)}">` +
+      ds.map(d => `<option value="${esc(d.en)}">${esc(LANG === "bn" ? d.bn : d.en)}</option>`).join("") +
+      "</optgroup>").join("");
+  $("district").value = keep;
+  $("districtwrap").hidden = false;
+  showOffice();
+}
+$("district").onchange = showOffice;
+(async () => {
+  try { AID = await (await fetch("/legal-aid")).json(); renderDistricts(); } catch (e) { /* older server */ }
+})();
 
 // ------------------------------------------------------------------ asking
 let controller = null;
@@ -506,6 +599,7 @@ function startView(question, parentQ = "") {
   $("qecho").textContent = question;
   $("answer").innerHTML = "";
   $("guidance").hidden = true; $("gtext").innerHTML = "";
+  renderNext(null); renderGlossary([]);
   $("badges").innerHTML = ""; $("tracewrap").hidden = true;
   $("actions").hidden = true; $("fbform").hidden = true; $("fbmsg").textContent = "";
   $("fbup").setAttribute("aria-pressed", "false"); $("fbdown").setAttribute("aria-pressed", "false");
@@ -544,7 +638,7 @@ async function submit() {
     if (useAgent) {
       steps("s_search");
       const r = await fetch("/ask", {method: "POST", headers: {"content-type": "application/json"}, signal: controller.signal,
-        body: JSON.stringify({question, k, agent: true, model: chosenModel(), ...thread})});
+        body: JSON.stringify({question, k, agent: true, plain: PLAIN, model: chosenModel(), ...thread})});
       if (!r.ok && r.status !== 503) { $("skeleton").hidden = true; steps(null); setNotice("bad", await failed(r)); }
       else render(await r.json());
     } else {
@@ -562,7 +656,7 @@ $("stop").onclick = () => { if (controller) controller.abort(); };
 
 async function stream(question, k, thread = {}) {
   const r = await fetch("/ask/stream", {method: "POST", headers: {"content-type": "application/json"},
-    signal: controller.signal, body: JSON.stringify({question, k, model: chosenModel(), ...thread})});
+    signal: controller.signal, body: JSON.stringify({question, k, plain: PLAIN, model: chosenModel(), ...thread})});
   if (!r.ok) {
     if (r.status === 503) { render(await r.json()); return; }
     $("skeleton").hidden = true; steps(null); setNotice("bad", await failed(r)); return;
@@ -638,7 +732,8 @@ async function copy(text, msg) {
 $("copytext").onclick = () => {
   const cited = [...SOURCES.values()].filter(s => !LAST || (LAST.data.sources || []).some(x => x.n === s.n))
     .map(s => `[${s.n}] ${s.citation}${s.url ? " " + s.url : ""}`).join("\n");
-  const body = [$("qecho").textContent, $("answer").innerText.trim(), $("guidance").hidden ? "" : $("gtext").innerText.trim(), cited,
+  const body = [$("qecho").textContent, $("answer").innerText.trim(), $("guidance").hidden ? "" : $("gtext").innerText.trim(),
+    checklistText(), cited,
     t("disclaimer")].filter(Boolean).join("\n\n");
   copy(body, t("copied"));
 };

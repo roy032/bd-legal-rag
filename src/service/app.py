@@ -65,8 +65,12 @@ from starlette.staticfiles import StaticFiles
 from rag.agent import AgentConfig, LegalAgent
 from rag.answer import answer_question, answer_question_stream
 from rag.chat import condense
+from rag.glossary import terms_in
 from rag.guardrails import GuardConfig
+from rag.legalaid import directory as legal_aid_directory
+from rag.legalaid import lang_of
 from rag.llm import LLMError
+from rag.nextsteps import checklist
 from rag.pii import redact
 from rag.pipeline import RetrievalConfig, index_built_at, index_fingerprint
 from rag.topics import match_topics
@@ -859,7 +863,9 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
              "amended": bool(h.metadata.get("amended")), "text": h.body[:1200]}
             for n, h in enumerate(hits, 1)]})
 
-    def serialize(ans, cached: bool = False, answer_id: str | None = None) -> dict:
+    def serialize(ans, cached: bool = False, answer_id: str | None = None,
+                  plain: bool = False) -> dict:
+        lang = lang_of(ans.question)
         return {
             "id": answer_id, "created": int(time.time()),
             "question": ans.question, "answer": ans.text,
@@ -872,6 +878,11 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
             "latency_s": round(ans.latency_s, 3),
             "trace": ans.checks.get("trace"), "stop_reason": ans.checks.get("stop_reason"),
             "disclaimer": "Informational only — not legal advice.",
+            # What to do next: cited steps from the answer, practical tips and who to
+            # call (rag/nextsteps.py); None for a question that is not a situation.
+            "next_steps": checklist(ans.question, ans.text, ans.refused, ans.general),
+            "plain": plain,
+            "glossary": terms_in(ans.text, lang) if plain and not ans.refused else [],
         }
 
     def live_statuses(ans, out: dict) -> None:
@@ -921,11 +932,16 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
             return await degraded_retrieval(question, k)
         asked = question
         question, parent = await follow_up(body, question, llm)
-        use_agent = cfg.agent_enabled and (bool(body.get("agent")) or
-                                           (cfg.agent_auto and wants_agent(question)))
+        plain = bool(body.get("plain"))
+        # The agent has its own prompts and no plain-language variant, so a plain
+        # request takes the agent only when it asks for it by name.
+        use_agent = cfg.agent_enabled and (bool(body.get("agent")) or (
+            cfg.agent_auto and not plain and wants_agent(question)))
         setting = {"k": k, "agent": use_agent, "language": body.get("language"), "model": model_id,
                    "fingerprint": state["fingerprint"], "retrieval": cfg.retrieval.to_dict(),
                    "min_score": cfg.min_score}
+        if plain:                     # absent when off, so existing cache keys stay valid
+            setting["plain"] = True
         key = cache_key(question, **setting)
         if (hit := answers.get(key)) is not None:
             metrics.inc("cache_hits_total")
@@ -944,8 +960,8 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
                 return LegalAgent(state["pipeline"], state["records"] or [], llm,
                                   AgentConfig(max_steps=cfg.max_steps, per_call_k=cfg.k,
                                               guard=guard(), seed=True)).run(question)
-            return answer_question(question, state["pipeline"], llm, k=k,
-                                   guard=guard(), language=body.get("language"))
+            return answer_question(question, state["pipeline"], llm, k=k, guard=guard(),
+                                   plain=plain, language=body.get("language"))
 
         def guarded():
             """One answer per distinct question at a time (single-flight), inside an
@@ -1003,7 +1019,8 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
 
         answer_id = uuid.uuid4().hex[:10]
         ans.question = asked
-        out = thread_fields(serialize(ans, answer_id=answer_id), asked, question, parent)
+        out = thread_fields(serialize(ans, answer_id=answer_id, plain=plain and not use_agent),
+                            asked, question, parent)
         await check_live(ans, out)
         answers.put(key, out)
         remember_paraphrase(para, key, ans)
@@ -1043,6 +1060,9 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         setting = {"k": k, "agent": False, "language": body.get("language"), "model": model_id,
                    "fingerprint": state["fingerprint"], "retrieval": cfg.retrieval.to_dict(),
                    "min_score": cfg.min_score}
+        plain = bool(body.get("plain"))
+        if plain:
+            setting["plain"] = True
         key = cache_key(question, **setting)
         if (hit := answers.get(key)) is not None:
             metrics.inc("cache_hits_total")
@@ -1074,7 +1094,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
                 with admission.slot():
                     for item in answer_question_stream(
                             question, state["pipeline"], stream_llm, k=k, guard=guard(),
-                            repair_llm=llm, language=body.get("language")):
+                            repair_llm=llm, plain=plain, language=body.get("language")):
                         kind = item["type"]
                         if kind == "token" and first_token:
                             first_token = False
@@ -1088,8 +1108,8 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
                             record_cost(ans)
                             answer_id = uuid.uuid4().hex[:10]
                             ans.question = asked
-                            out = thread_fields(serialize(ans, answer_id=answer_id), asked,
-                                                question, parent)
+                            out = thread_fields(serialize(ans, answer_id=answer_id, plain=plain),
+                                                asked, question, parent)
                             if cfg.verify_live and not ans.refused:
                                 live_statuses(ans, out)
                             answers.put(key, out)
@@ -1159,6 +1179,11 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
             return JSONResponse({"error": "not found or expired"}, status_code=404, headers=vary)
         return JSONResponse(stored, headers=vary)
 
+    async def legal_aid(request: Request):
+        """Hotlines and the 64 district legal aid offices, for the help box on the page."""
+        return JSONResponse(legal_aid_directory(),
+                            headers={"cache-control": "public, max-age=86400"})
+
     async def index_page(request: Request):
         return FileResponse(STATIC / "index.html")
 
@@ -1203,6 +1228,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         Route("/ask", ask, methods=["POST"]),
         Route("/ask/stream", ask_stream, methods=["POST"]),
         Route("/feedback", feedback, methods=["POST"]),
+        Route("/legal-aid", legal_aid),
         Route("/a/{answer_id}", permalink),
     ]
     if STATIC.exists():

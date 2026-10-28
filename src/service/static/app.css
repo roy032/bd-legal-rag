@@ -372,3 +372,56 @@ footer.site .row { display: flex; gap: 6px 18px; flex-wrap: wrap; }
 .thread { color: var(--muted); font-size: 13.5px; margin: 0 0 4px; overflow-wrap: anywhere; }
 .searched { color: var(--muted); font-size: 13.5px; margin: -8px 0 14px; overflow-wrap: anywhere; }
 @media print { .fupill, #followup { display: none !important; } }
+
+/* ---------------------------------------------------------------- plain language */
+.askrow .plaintoggle { height: 36px; }
+@media (max-width: 699px) { .askrow .plaintoggle { order: 1; } }
+
+/* ---------------------------------------------------------------- what to do next */
+.nextsteps, .gloss { margin: 16px 22px 0; }
+.nextsteps { border: 1px solid var(--accent-line); background: color-mix(in srgb, var(--accent-soft) 45%, var(--panel));
+  border-radius: 14px; padding: 14px 18px 12px; }
+.nextsteps[hidden], .gloss[hidden], #nstipswrap[hidden], #nslist[hidden] { display: none; }
+.nshead { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.nshead h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 16.5px; color: var(--accent); }
+.nshead .linkbtn { font-size: 13.5px; }
+.nextsteps h4 { margin: 14px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+:lang(bn) .nextsteps h4 { text-transform: none; letter-spacing: 0; font-size: 14px; }
+.checks { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; }
+.checks li { display: flex; gap: 10px; align-items: flex-start; line-height: 1.6; }
+.checks input { flex: none; width: 20px; height: 20px; margin: 3px 0 0; accent-color: var(--accent); }
+.checks input:checked + label { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--line-2); }
+.tips { margin: 0; padding-left: 20px; line-height: 1.6; }
+.helplist { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.helplist li { display: flex; gap: 12px; align-items: center; }
+.helplist span { display: flex; flex-direction: column; min-width: 0; line-height: 1.45; }
+.helplist small { color: var(--muted); font-size: 13.5px; }
+.phone.sm { height: 36px; min-width: 78px; justify-content: center; padding: 0 12px; font-size: 15px; border-radius: 10px; }
+.nsnote { margin: 12px 0 0; font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+.gloss { border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; }
+.gloss summary { cursor: pointer; font-weight: 600; font-size: 14.5px; }
+.gloss dl { margin: 10px 0 2px; display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; }
+.gloss dt { font-weight: 650; }
+.gloss dd { margin: 0; color: var(--ink-2); }
+
+/* District legal aid office picker, inside the help box. */
+.district { margin-top: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.district label { font-size: 13.5px; font-weight: 600; }
+.district select { height: 36px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: inherit;
+  padding: 0 10px; font: inherit; font-size: 14px; max-width: 100%; }
+.district .office { flex: 1 1 100%; margin: 2px 0 0; font-size: 13.5px; }
+.district .office:empty { display: none; }
+.district[hidden] { display: none; }
+
+@media (max-width: 699px) {
+  .nextsteps, .gloss { margin-left: 16px; margin-right: 16px; }
+  .gloss dl { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .gloss dd { margin-bottom: 8px; }
+  .helplist .phone.sm { width: auto; }
+}
+@media print {
+  .nshead .linkbtn, .district { display: none !important; }
+  .nextsteps { background: none; }
+  .gloss { display: block; }
+  .gloss dl { display: grid !important; }
+}

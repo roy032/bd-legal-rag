@@ -232,6 +232,7 @@ tests/             offline test suite
 |---|---|
 | [docs/RUNBOOK_WINDOWS.md](docs/RUNBOOK_WINDOWS.md) | the full run on a Windows laptop, from downloaded pages to evaluated system |
 | [docs/OPERATIONS.md](docs/OPERATIONS.md) | running the service: probes, load shedding, circuit breaker, metrics, logs, alerts |
+| [docs/LEGAL_AID.md](docs/LEGAL_AID.md) | the "what to do next" checklist, plain-language mode, and the legal-aid numbers (to check before launch) |
 | [docs/DATA_CARD.md](docs/DATA_CARD.md) | what the corpus contains and leaves out |
 | [docs/adr/](docs/adr/) | design decisions, one file each |
 | [docs/BUILD_NOTES.md](docs/BUILD_NOTES.md) | the build log, phase by phase |
