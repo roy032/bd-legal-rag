@@ -43,9 +43,13 @@ def looks_like_follow_up(question: str) -> bool:
     return bool(FOLLOW_UP_HINT.match(q)) or len(q.split()) <= 4
 
 
-def condense(history: list[tuple[str, str]], question: str, llm, max_turns: int = 3) -> str:
-    """Rewrite a follow-up into a standalone question. Falls back to the original."""
-    if not history or not llm or not looks_like_follow_up(question):
+def condense(history: list[tuple[str, str]], question: str, llm, max_turns: int = 3,
+             always: bool = False) -> str:
+    """Rewrite a follow-up into a standalone question. Falls back to the original.
+
+    `always`: the visitor said this is a follow-up (the web app's Follow up button), so
+    rewrite even a long question; otherwise only short or leaning ones are rewritten."""
+    if not history or not llm or not (always or looks_like_follow_up(question)):
         return question
     recent = history[-max_turns:]
     text = "\n".join(f"Q: {q}\nA: {a[:300]}" for q, a in recent)
@@ -55,6 +59,7 @@ def condense(history: list[tuple[str, str]], question: str, llm, max_turns: int 
     except Exception:
         return question
     out = (out or "").strip().splitlines()[0].strip() if out else ""
+    out = re.sub(r"^(standalone question|question)\s*:\s*", "", out, flags=re.I).strip(' "“”')
     # A rewrite that drops everything or explodes in length is worse than the original.
     return out if 3 <= len(out) <= 400 else question
 

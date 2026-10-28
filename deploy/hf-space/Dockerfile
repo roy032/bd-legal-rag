@@ -27,6 +27,7 @@ ENV HOME=/home/user HF_HOME=/home/user/.cache/huggingface \
     BDRAG_INDEX=/home/user/app/data/index BDRAG_MODE=dense BDRAG_RATE_PER_MIN=20 \
     BDRAG_DAILY_LIMIT=500 BDRAG_FEEDBACK=/home/user/app/data/feedback.jsonl \
     BDRAG_ANALYTICS=/home/user/app/data/queries.jsonl \
+    BDRAG_ANSWERS_DB=/home/user/app/data/answers.sqlite3 \
     BDRAG_FRAME_ANCESTORS="https://huggingface.co https://*.hf.space" \
     BDRAG_TRUST_PROXY=1
 EXPOSE 7860

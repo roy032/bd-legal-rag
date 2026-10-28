@@ -27,12 +27,15 @@ const T = {
     trust2: "Every claim cited to a section", trust3: "Free, no sign-up",
     examples: "Try a question", glabel: "General guidance — not from the indexed law text",
     trace: "What the deeper search did", helpful: "Helpful", nothelpful: "Not helpful", copy: "Copy",
+    followup: "Follow up", followingup: "Following up on", l_fuclear: "Ask a new question instead",
+    placeholder3: "Ask a follow-up, e.g. “And what is the fine?”",
+    followupto: q => `Follow-up to: “${q}”`, searchedas: q => `Searched as: “${q}”`,
     share: "Share", print: "Print", useful: "Was this useful?", yes: "Yes", no: "No", call: "Call",
     eyebrow: "Free · Bangla & English · Cited to the section", enterhint: "Enter to ask · Shift+Enter for a new line",
     answerlabel: "Answer", send: "Send", sources: "Sources from the law",
     aid1: "Need help with your own case?",
     aid2: "Call the government's free legal aid hotline (National Legal Aid Services Organisation), toll-free, or visit the legal aid office at your district judge's court.",
-    recent: "Your recent questions", clear: "Clear", how: "How this works",
+    recent: "Your recent questions", clear: "Clear", privacy: "Privacy and terms", how: "How this works",
     how1: "Your question is matched against the sections of Bangladeshi Acts published on the Laws of Bangladesh website, in Bangla and English.",
     how2: "The closest sections are given to a language model, which answers only from them and cites each claim as [n].",
     how3: "Automatic checks confirm every citation points to a real excerpt. If the law text does not cover the question, it says so.",
@@ -50,6 +53,7 @@ const T = {
     amended: "amended", repealed: "repealed act", current: "✓ matches the site today", changed: "⚠ changed on the site since indexing",
     repaired: "re-checked once", cached: "instant (cached)", similar: "Answered earlier for a very similar question.",
     similar2: q => `It was: “${q}”. If that is not what you asked, add detail and ask again.`, conf: "confidence", seconds: s => `${s}s`,
+    answered_on: d => `Answered on ${d}; the law may have changed since.`,
     confl: {high: "high", medium: "medium", low: "low"},
     fail: {uncited_sentences: "some sentences lack a citation", invalid_citations: "cites a missing excerpt",
            unsupported_claims: "a claim may not be in the excerpts", fabricated_quotes: "a quote is not verbatim",
@@ -73,12 +77,15 @@ const T = {
     trust2: "প্রতিটি কথার সঙ্গে ধারার উল্লেখ", trust3: "বিনামূল্যে, নিবন্ধন লাগে না",
     examples: "একটি প্রশ্ন দিয়ে শুরু করুন", glabel: "সাধারণ দিকনির্দেশনা — সূচিভুক্ত আইনের পাঠ থেকে নয়",
     trace: "গভীর অনুসন্ধানে কী করা হলো", helpful: "উপকারী", nothelpful: "উপকারী নয়", copy: "কপি",
+    followup: "আরও জিজ্ঞেস করুন", followingup: "আগের প্রশ্নের সূত্রে", l_fuclear: "নতুন প্রশ্ন করুন",
+    placeholder3: "এই উত্তরের সূত্রে প্রশ্ন লিখুন, যেমন: “আর জরিমানা কত?”",
+    followupto: q => `আগের প্রশ্ন: “${q}”`, searchedas: q => `যেভাবে খোঁজা হয়েছে: “${q}”`,
     share: "শেয়ার", print: "প্রিন্ট", useful: "উত্তরটি কি কাজে লেগেছে?", yes: "হ্যাঁ", no: "না", call: "কল করুন",
     eyebrow: "বিনামূল্যে · বাংলা ও ইংরেজি · ধারাসহ উত্তর", enterhint: "Enter চাপলে প্রশ্ন যাবে · নতুন লাইনে Shift+Enter",
     answerlabel: "উত্তর", send: "পাঠান", sources: "আইনের উৎস",
     aid1: "নিজের মামলায় সাহায্য দরকার?",
     aid2: "সরকারের বিনামূল্যের আইনগত সহায়তা হটলাইনে (জাতীয় আইনগত সহায়তা প্রদান সংস্থা) টোল-ফ্রি কল করুন, অথবা আপনার জেলা জজ আদালতের লিগ্যাল এইড অফিসে যান।",
-    recent: "আপনার সাম্প্রতিক প্রশ্ন", clear: "মুছুন", how: "এটি কীভাবে কাজ করে",
+    recent: "আপনার সাম্প্রতিক প্রশ্ন", clear: "মুছুন", privacy: "গোপনীয়তা ও শর্ত", how: "এটি কীভাবে কাজ করে",
     how1: "আপনার প্রশ্ন Laws of Bangladesh ওয়েবসাইটে প্রকাশিত বাংলাদেশের আইনের ধারাগুলোর সঙ্গে মিলিয়ে দেখা হয়, বাংলা ও ইংরেজি দুই ভাষাতেই।",
     how2: "সবচেয়ে কাছের ধারাগুলো একটি ভাষা মডেলকে দেওয়া হয়, যা কেবল সেগুলো থেকেই উত্তর দেয় এবং প্রতিটি কথার পাশে [n] আকারে উৎস দেখায়।",
     how3: "স্বয়ংক্রিয় যাচাই নিশ্চিত করে যে প্রতিটি উল্লেখ একটি আসল অংশকে নির্দেশ করে। আইনের পাঠে উত্তর না থাকলে তা স্পষ্ট বলা হয়।",
@@ -96,6 +103,7 @@ const T = {
     amended: "সংশোধিত", repealed: "রহিত আইন", current: "✓ সাইটের বর্তমান পাঠের সঙ্গে মেলে", changed: "⚠ সূচিভুক্তির পর সাইটে বদলেছে",
     repaired: "একবার পুনর্যাচাই", cached: "তাৎক্ষণিক (ক্যাশ)", similar: "খুব কাছাকাছি একটি আগের প্রশ্নের উত্তর দেখানো হচ্ছে।",
     similar2: q => `আগের প্রশ্ন: “${q}”। আপনার প্রশ্নের সঙ্গে না মিললে আরও বিস্তারিত লিখে আবার জিজ্ঞেস করুন।`, conf: "আস্থা", seconds: s => `${toBn(s)} সেকেন্ড`,
+    answered_on: d => `উত্তর দেওয়া হয়েছিল ${d}; এরপর আইন বদলে থাকতে পারে।`,
     confl: {high: "উচ্চ", medium: "মাঝারি", low: "নিম্ন"},
     fail: {uncited_sentences: "কিছু বাক্যে উৎস নেই", invalid_citations: "অনুপস্থিত অংশের উল্লেখ",
            unsupported_claims: "কোনো দাবি অংশে না-ও থাকতে পারে", fabricated_quotes: "উদ্ধৃতি হুবহু নয়",
@@ -146,7 +154,7 @@ function applyLang(lang) {
     else el.textContent = t(key);
   });
   document.querySelectorAll("[data-i18n-label]").forEach(el => el.setAttribute("aria-label", t(el.dataset.i18nLabel)));
-  $("q").placeholder = t(document.body.classList.contains("answered") ? "placeholder2" : "placeholder");
+  $("q").placeholder = t(followOf ? "placeholder3" : document.body.classList.contains("answered") ? "placeholder2" : "placeholder");
   document.querySelectorAll(".seg [data-lang]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.lang === LANG)));
   renderTabs();
   renderHistory();
@@ -408,7 +416,13 @@ function render(d, opts = {}) {
   $("badges").innerHTML = "";
   if (d.repaired) badge(t("repaired"), "warn");
   (d.failures || []).forEach(f => badge(t("fail")[f] || f.replace(/_/g, " "), "bad"));
-  if (d.cached) badge(t("cached"));
+  if (d.cached && !opts.fromPermalink) badge(t("cached"));
+  if (opts.fromPermalink && d.created) {
+    // A shared answer quotes the law as it stood that day: say which day.
+    const day = new Date(d.created * 1000).toLocaleDateString(LANG === "bn" ? "bn-BD" : "en-GB",
+      {year: "numeric", month: "long", day: "numeric"});
+    badge(t("answered_on", day), "warn");
+  }
   if (d.stop_reason) badge(t("agent", d.stop_reason, (d.trace || []).length));
   if (d.latency_s && !d.cached) badge(t("seconds", Math.round(d.latency_s * 10) / 10));
   if (d.confidence) {
@@ -422,7 +436,9 @@ function render(d, opts = {}) {
       `<li>${esc(t("step", x.step))}: ${esc(x.tool || x.type)}${x.parallel > 1 ? " ×" + esc(x.parallel) : ""}` +
       `${x.new_excerpts != null ? esc(t("excerptsplus", x.new_excerpts)) : ""}</li>`).join("");
   } else { $("tracewrap").hidden = true; }
+  if (d.searched_for) { $("searched").hidden = false; $("searched").textContent = t("searchedas", d.searched_for); }
   currentId = d.id || null;
+  $("followup").hidden = !currentId || !!d.degraded;
   $("actions").hidden = !(d.answer || d.degraded);
   $("fbup").hidden = $("fbdown").hidden = !currentId;
   $("share").hidden = !currentId;
@@ -441,8 +457,28 @@ function busy(on) {
   $("stop").hidden = !on;
 }
 
-function startView(question) {
+// ------------------------------------------------------------------ follow-ups
+// The server keeps the conversation: a follow-up names the answer it continues and the
+// server rewrites it with the stored turns ("and the fine?" -> a standalone question).
+let followOf = null;
+function setFollow(id, question) {
+  followOf = id || null;
+  $("fupill").hidden = !followOf;
+  $("fuq").textContent = question || "";
+  box.placeholder = t(followOf ? "placeholder3" : document.body.classList.contains("answered") ? "placeholder2" : "placeholder");
+}
+$("followup").onclick = () => {
+  if (!currentId) return;
+  setFollow(currentId, $("qecho").textContent);
+  window.scrollTo({top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"});
+  box.focus();
+};
+$("fuclear").onclick = () => { setFollow(null); box.focus(); };
+
+function startView(question, parentQ = "") {
   $("settings").open = false;
+  $("thread").hidden = !parentQ; $("thread").textContent = parentQ ? t("followupto", parentQ) : "";
+  $("searched").hidden = true; $("searched").textContent = "";
   document.body.classList.add("answered");
   // The question moves to the heading above the answer; the box is free for the next one.
   box.value = ""; grow(); box.placeholder = t("placeholder2");
@@ -474,22 +510,25 @@ async function submit() {
     startView(question); box.value = question; grow();      // keep the text so it can be shortened
     steps(null); $("skeleton").hidden = true; setNotice("warn", t("toolong", MAX_CHARS)); return;
   }
-  startView(question);
+  const parent = followOf, parentQ = $("fuq").textContent;
+  setFollow(null);
+  startView(question, parent ? parentQ : "");
   rememberQ(question);
   busy(true);
   controller = new AbortController();
   const useAgent = $("agent").checked, k = +$("k").value || 5;
+  const thread = parent ? {follow_up_of: parent} : {};
   try {
     // The agent makes several calls and has nothing to stream in between, so it
     // uses the plain endpoint; single-shot answers stream token by token.
     if (useAgent) {
       steps("s_search");
       const r = await fetch("/ask", {method: "POST", headers: {"content-type": "application/json"}, signal: controller.signal,
-        body: JSON.stringify({question, k, agent: true, model: chosenModel()})});
+        body: JSON.stringify({question, k, agent: true, model: chosenModel(), ...thread})});
       if (!r.ok && r.status !== 503) { $("skeleton").hidden = true; steps(null); setNotice("bad", await failed(r)); }
       else render(await r.json());
     } else {
-      await stream(question, k);
+      await stream(question, k, thread);
     }
   } catch (e) {
     $("skeleton").hidden = true; $("answer").classList.remove("caret");
@@ -501,9 +540,9 @@ async function submit() {
 }
 $("stop").onclick = () => { if (controller) controller.abort(); };
 
-async function stream(question, k) {
+async function stream(question, k, thread = {}) {
   const r = await fetch("/ask/stream", {method: "POST", headers: {"content-type": "application/json"},
-    signal: controller.signal, body: JSON.stringify({question, k, model: chosenModel()})});
+    signal: controller.signal, body: JSON.stringify({question, k, model: chosenModel(), ...thread})});
   if (!r.ok) {
     if (r.status === 503) { render(await r.json()); return; }
     $("skeleton").hidden = true; steps(null); setNotice("bad", await failed(r)); return;

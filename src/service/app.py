@@ -12,7 +12,8 @@ Endpoints
   GET  /stats           config, cache, cost projection
   GET  /metrics         Prometheus text
   POST /search          retrieval only — no model call, free and fast
-  POST /ask             grounded answer with citations and guardrail report
+  POST /ask             grounded answer with citations and guardrail report;
+                        {"follow_up_of": "<answer id>"} continues a conversation
   POST /ask/stream      the same, streamed as server-sent events
   POST /feedback        thumbs up/down + comment, appended to a JSONL file
   GET  /a/{id}          permalink to a previously produced answer
@@ -31,9 +32,13 @@ Three things here that are easy to get wrong and expensive to get wrong:
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
+import html
 import json
 import logging
 import os
+import re
 import threading
 import time
 import uuid
@@ -47,17 +52,25 @@ from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
-from starlette.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
+from starlette.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    StreamingResponse,
+)
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from rag.agent import AgentConfig, LegalAgent
 from rag.answer import answer_question, answer_question_stream
+from rag.chat import condense
 from rag.guardrails import GuardConfig
 from rag.llm import LLMError
 from rag.pii import redact
 from rag.pipeline import RetrievalConfig, index_fingerprint
 from rag.topics import match_topics
+from service.answers import AnswerStore
 from service.backends import make_cache, make_limiter
 from service.cache import cache_key
 from service.cost import estimate_cost, project_monthly
@@ -155,6 +168,10 @@ class ServiceConfig:
     # built in a test never appends to the real data/queries.jsonl.
     feedback_path: str = ""
     analytics_path: str = ""
+    # Shared answers (/a/<id>): a SQLite file so links survive restarts and deploys;
+    # empty = memory only. Kept this many days, then deleted; 0 = forever.
+    answers_path: str = ""
+    answer_days: float = 90
     cors_origins: list[str] = field(default_factory=lambda: ["*"])
     trust_proxy: bool = False
     verify_live: bool = False        # re-check cited sections against bdlaws (rag/verify.py)
@@ -232,6 +249,8 @@ class ServiceConfig:
             general_fallback=_env_bool("BDRAG_GENERAL_FALLBACK", True),
             feedback_path=_env_str("BDRAG_FEEDBACK", "data/feedback.jsonl"),
             analytics_path=_env_str("BDRAG_ANALYTICS", "data/queries.jsonl"),
+            answers_path=_env_str("BDRAG_ANSWERS_DB", "data/answers.sqlite3"),
+            answer_days=_env_float("BDRAG_ANSWER_DAYS", 90.0) or 0.0,
             cors_origins=[o.strip() for o in _env_str("BDRAG_CORS", "*").split(",") if o.strip()],
             trust_proxy=_env_bool("BDRAG_TRUST_PROXY", False),
             verify_live=_env_bool("BDRAG_VERIFY_LIVE", False),
@@ -248,6 +267,37 @@ class ServiceConfig:
             semantic_cache=_env_str("BDRAG_SEMANTIC_CACHE", "auto"),
             semantic_overlap=_env_float("BDRAG_SEMANTIC_OVERLAP", 0.6) or 0.0,
         )
+
+
+def _clip(text: object, n: int) -> str:
+    text = " ".join(str(text or "").split())
+    return text if len(text) <= n else text[:n - 1].rstrip() + "…"
+
+
+def share_page(stored: dict | None) -> str:
+    """index.html with a shared answer's question as the title and its opening as the
+    link-preview description. Shared answers are marked noindex: they hold what a
+    visitor asked, which is theirs to pass on, not a search engine's to publish."""
+    page = (STATIC / "index.html").read_text(encoding="utf-8")
+    robots = '<meta name="robots" content="noindex">\n'
+    if not stored:
+        return page.replace("</head>", robots + "</head>", 1)
+    title = html.escape(_clip(stored.get("question"), 90) + " · Bangladesh Law Assistant",
+                        quote=True)
+    desc = html.escape(_clip(re.sub(r"\[\d+\]|[*#_`>]", "", stored.get("answer") or "")
+                             or "Cited answer about Bangladeshi law.", 200), quote=True)
+    # Functions, not replacement strings: a backslash in a question is not a group.
+    page = re.sub(r"<title>.*?</title>", lambda _: f"<title>{title}</title>", page,
+                  count=1, flags=re.S)
+    def fill(attr: str, value: str) -> None:
+        nonlocal page
+        page = re.sub(rf'(<meta {attr} content=")[^"]*', lambda m: m.group(1) + value, page,
+                      count=1)
+
+    fill('property="og:title"', title)
+    fill('property="og:description"', desc)
+    fill('name="description"', desc)
+    return page.replace("</head>", robots + "</head>", 1)
 
 
 def route_label(request: Request) -> str:
@@ -383,7 +433,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
     metrics = Metrics()
     answers = make_cache(cfg.cache_ttl_s, cfg.cache_size)
     limiter = make_limiter(cfg.rate_per_min, cfg.burst)
-    recent: dict[str, dict] = {}             # permalinks: id -> answer payload
+    recent = AnswerStore(cfg.answers_path, cfg.answer_days)     # permalinks: id -> payload
     state: dict = {"pipeline": pipeline, "llm": llm, "stream_llm": stream_llm,
                    "records": records, "agent": None, "ready": pipeline is not None,
                    "fingerprint": index_fingerprint(cfg.index), "load_error": None}
@@ -486,16 +536,67 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
                                                     guard=guard(), seed=True))
         return state["agent"]
 
-    def remember(answer_id: str, out: dict, ans, client, use_agent: bool) -> None:
+    salt = os.urandom(16)
+
+    def visitor(request: Request) -> str:
+        """The query log counts repeat visitors without holding their IP address: a
+        keyed hash of the address (never of an API key), with a key that lives only as
+        long as the process."""
+        address = _client(request, cfg.trust_proxy).encode()
+        return hmac.new(salt, address, hashlib.sha256).hexdigest()[:12]
+
+    def remember(answer_id: str, out: dict, ans, client: str, use_agent: bool) -> None:
         """Permalink store (bounded) + one analytics row per answer, for both
         the plain and the streaming endpoint."""
-        recent[answer_id] = out
-        while len(recent) > 500:
-            recent.pop(next(iter(recent)))
+        recent.put(answer_id, out)
         _append_jsonl(cfg.analytics_path, {
-            "ts": time.time(), "id": answer_id, "client": client, "question": ans.question,
+            "ts": time.time(), "id": answer_id, "client": client,
+            "question": ans.question,
             "agent": use_agent, "refused": ans.refused, "failures": ans.failures,
             "sources": [s["chunk_id"] for s in ans.sources], "latency_s": round(ans.latency_s, 2)})
+
+    def thread_history(parent_id: str, turns: int = 3) -> list[tuple[str, str]]:
+        """The earlier turns of a conversation, oldest first, read from the answer store
+        rather than from the request: the client names the answer it follows up on and
+        the server supplies what was said, so a request cannot invent a history."""
+        out: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        while parent_id and parent_id not in seen and len(out) < turns:
+            seen.add(parent_id)
+            stored = recent.get(parent_id)
+            if not stored:
+                break
+            out.append((stored.get("searched_for") or stored.get("question") or "",
+                        stored.get("answer") or ""))
+            parent_id = str(stored.get("parent") or "")
+        return out[::-1]
+
+    async def follow_up(body: dict, question: str, llm) -> tuple[str, str | None]:
+        """(standalone question, parent id). A follow-up ("and the fine?") retrieves
+        nothing on its own; it is rewritten with the earlier turns first (rag/chat.py).
+        Any failure leaves the question as asked."""
+        parent = str(body.get("follow_up_of") or "").strip()[:32]
+        if not parent or getattr(llm, "offline_stub", False):
+            return question, None
+        history = thread_history(parent)
+        if not history:
+            return question, None
+        standalone = await run_in_threadpool(condense, history, question, llm, 3, True)
+        if cfg.redact_pii:
+            standalone = redact(standalone)[0]
+        metrics.inc("follow_ups_total", rewritten=str(standalone != question))
+        return standalone, parent
+
+    def thread_fields(out: dict, asked: str, standalone: str, parent: str | None) -> dict:
+        """The user's own words stay the question; the rewrite is shown as what was searched."""
+        out.pop("parent", None)
+        out.pop("searched_for", None)
+        out["question"] = asked
+        if parent:
+            out["parent"] = parent
+        if standalone != asked:
+            out["searched_for"] = standalone
+        return out
 
     def pick_model(body: dict):
         """(llm, stream_llm, id) for the model the request asks for; None = unknown model."""
@@ -684,6 +785,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
             "circuit": {"state": breaker.state, "trips": breaker.trips,
                         "consecutive_failures": breaker.failures},
             "singleflight_shared": flights.shared,
+            "shared_answers": {"stored": len(recent), "durable": recent.durable},
             "cost": {"total_usd": round(spend, 4), "per_query_usd": round(per_query, 5),
                      "projected_monthly_usd_at_200_per_day": round(project_monthly(per_query), 2)},
             "metrics": snap,
@@ -728,7 +830,8 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
 
     def serialize(ans, cached: bool = False, answer_id: str | None = None) -> dict:
         return {
-            "id": answer_id, "question": ans.question, "answer": ans.text,
+            "id": answer_id, "created": int(time.time()),
+            "question": ans.question, "answer": ans.text,
             "refused": ans.refused, "abstained": ans.abstained, "repaired": ans.repaired,
             # Not grounded in the indexed laws: label it and replace any streamed draft.
             "general_guidance": ans.general,
@@ -785,6 +888,8 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         llm, _, model_id = picked
         if getattr(llm, "offline_stub", False):
             return await degraded_retrieval(question, k)
+        asked = question
+        question, parent = await follow_up(body, question, llm)
         use_agent = cfg.agent_enabled and (bool(body.get("agent")) or
                                            (cfg.agent_auto and wants_agent(question)))
         setting = {"k": k, "agent": use_agent, "language": body.get("language"), "model": model_id,
@@ -793,10 +898,10 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         key = cache_key(question, **setting)
         if (hit := answers.get(key)) is not None:
             metrics.inc("cache_hits_total")
-            return JSONResponse({**hit, "cached": True})
+            return JSONResponse(thread_fields({**hit, "cached": True}, asked, question, parent))
         similar, para = await run_in_threadpool(semantic_hit, question, cache_key("", **setting))
         if similar is not None:
-            return JSONResponse(similar)
+            return JSONResponse(thread_fields(similar, asked, question, parent))
         breaker_mode = breaker.allow()
         if (unavailable := await model_unavailable(question, k, breaker_mode)) is not None:
             return unavailable
@@ -866,11 +971,12 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
             record_cost(ans)
 
         answer_id = uuid.uuid4().hex[:10]
-        out = serialize(ans, answer_id=answer_id)
+        ans.question = asked
+        out = thread_fields(serialize(ans, answer_id=answer_id), asked, question, parent)
         await check_live(ans, out)
         answers.put(key, out)
         remember_paraphrase(para, key, ans)
-        remember(answer_id, out, ans, client, use_agent)
+        remember(answer_id, out, ans, visitor(request), use_agent)
         trace.finish(endpoint="ask", refused=ans.refused, agent=use_agent,
                      llm_calls=ans.llm_calls)
         return JSONResponse(out)
@@ -895,6 +1001,8 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         llm, stream_llm, model_id = picked
         if getattr(stream_llm, "offline_stub", False):
             return await degraded_retrieval(question, k)
+        asked = question
+        question, parent = await follow_up(body, question, llm)
 
         def sse(event: str, data: dict) -> str:
             return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
@@ -907,11 +1015,12 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         key = cache_key(question, **setting)
         if (hit := answers.get(key)) is not None:
             metrics.inc("cache_hits_total")
-            cached = {**hit, "cached": True}
+            cached = thread_fields({**hit, "cached": True}, asked, question, parent)
             return StreamingResponse(iter([sse("final", cached)]),
                                      media_type="text/event-stream", headers=headers)
         similar, para = await run_in_threadpool(semantic_hit, question, cache_key("", **setting))
         if similar is not None:
+            similar = thread_fields(similar, asked, question, parent)
             return StreamingResponse(iter([sse("final", similar)]),
                                      media_type="text/event-stream", headers=headers)
         breaker_mode = breaker.allow()
@@ -924,6 +1033,8 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
             except Exception:
                 hits = []
             return sse("final", degraded_payload(question, hits, error))
+
+        who = visitor(request)
 
         def events():
             t0 = time.perf_counter()
@@ -945,12 +1056,14 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
                                         outcome="refused" if ans.refused else "answered")
                             record_cost(ans)
                             answer_id = uuid.uuid4().hex[:10]
-                            out = serialize(ans, answer_id=answer_id)
+                            ans.question = asked
+                            out = thread_fields(serialize(ans, answer_id=answer_id), asked,
+                                                question, parent)
                             if cfg.verify_live and not ans.refused:
                                 live_statuses(ans, out)
                             answers.put(key, out)
                             remember_paraphrase(para, key, ans)
-                            remember(answer_id, out, ans, client, False)
+                            remember(answer_id, out, ans, who, False)
                             yield sse("final", out)
                         else:
                             yield sse(kind, {k2: v for k2, v in item.items() if k2 != "type"})
@@ -984,7 +1097,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         rating = body.get("rating")
         if rating not in ("up", "down"):
             return JSONResponse({"error": "rating must be 'up' or 'down'"}, status_code=400)
-        stored = recent.get(answer_id, {})
+        stored = recent.get(answer_id) or {}
         comment = str(body.get("comment") or "")
         if cfg.redact_pii:
             comment = redact(comment)[0]
@@ -1005,10 +1118,12 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         # from the cached page, whatever Accept header the fetch sends.
         accept = request.headers.get("accept", "")
         vary = {"vary": "accept"}
+        stored = recent.get(request.path_params["answer_id"])
         if (request.query_params.get("format") != "json"
                 and "text/html" in accept and "application/json" not in accept):
-            return FileResponse(STATIC / "index.html", headers=vary)
-        stored = recent.get(request.path_params["answer_id"])
+            # The page with this answer's question in the title and the link preview,
+            # so a link pasted into Messenger or WhatsApp says what it is about.
+            return HTMLResponse(share_page(stored), headers=vary)
         if not stored:
             return JSONResponse({"error": "not found or expired"}, status_code=404, headers=vary)
         return JSONResponse(stored, headers=vary)
@@ -1016,8 +1131,33 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
     async def index_page(request: Request):
         return FileResponse(STATIC / "index.html")
 
+    async def privacy_page(request: Request):
+        return FileResponse(STATIC / "privacy.html")
+
+    async def robots(request: Request):
+        # Shared answers hold what visitors asked; the API is not content.
+        return PlainTextResponse("User-agent: *\nAllow: /$\nAllow: /privacy\nAllow: /static/\n"
+                                 "Disallow: /a/\nDisallow: /ask\nDisallow: /search\n"
+                                 "Disallow: /metrics\nDisallow: /stats\n")
+
+    async def manifest(request: Request):
+        # Lets a phone add the app to its home screen with its own icon and colours.
+        return JSONResponse({
+            "name": "Bangladesh Law Assistant · বাংলাদেশ আইন সহায়ক",
+            "short_name": "আইন সহায়ক", "start_url": "/", "scope": "/", "display": "standalone",
+            "lang": "bn", "background_color": "#f6f4ef", "theme_color": "#0b4f3a",
+            "description": "Free answers about Bangladeshi law in Bangla or English, "
+                           "cited to the section of the Act.",
+            "icons": [{"src": "/static/favicon.svg", "sizes": "any", "type": "image/svg+xml",
+                       "purpose": "any"}],
+        }, media_type="application/manifest+json")
+
     routes: list[Route | Mount] = [
         Route("/", index_page),
+        Route("/privacy", privacy_page),
+        Route("/terms", privacy_page),
+        Route("/robots.txt", robots),
+        Route("/manifest.webmanifest", manifest),
         Route("/health", health),
         Route("/livez", livez),
         Route("/readyz", readyz),
