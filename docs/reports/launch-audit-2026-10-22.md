@@ -26,13 +26,13 @@ bilingual UI with share, print, copy, history and feedback.
 
 | # | Gap | Severity | Status |
 |---|---|---|---|
-| 1 | **No human check of answer correctness.** Every quality number comes from retrieval gold labels or one small judge model. Nobody qualified has read a sample of answers. For a legal product this is the main risk | high | open: needs a Bangladeshi lawyer or law student to grade ~50 answers with a rubric (correct law, correct section, safe advice) |
+| 1 | **No human check of answer correctness.** Every quality number comes from retrieval gold labels or one small judge model. Nobody qualified has read a sample of answers. For a legal product this is the main risk | high | kit ready 2026-10-27: `bdrag review` writes a grading page and scores it against a launch bar ([rubric](../review/RUBRIC.md)); still needs the laptop run and a Bangladeshi lawyer or law student to grade ~50 answers |
 | 2 | **Share links died on every restart.** Answers lived in a 500-entry dict, so a link pasted into Messenger or WhatsApp broke after a deploy or a busy hour | high | **fixed in this round** |
 | 3 | **No follow-up questions.** `rag/chat.py` existed but the service and page never used it; "and the fine?" retrieved nothing | high | **fixed in this round** |
 | 4 | **No privacy policy or terms**, and the query log held raw IP addresses | high for a public launch | **fixed in this round** (page needs your review) |
 | 5 | **Answers take 20 to 115 s on a laptop CPU.** Caches help repeat questions only | high | open: host the model on a machine with a GPU, or offer the free hosted models already supported (Groq, Gemini) with the consent notice the page already shows |
 | 6 | **The index is a snapshot with no refresh schedule.** Parliament amends acts; `BDRAG_VERIFY_LIVE` is opt-in and per answer | medium | partly done 2026-10-27: index age in `/readyz`, `/metrics`, `bdrag doctor` and a stale-index alert; the monthly re-ingest itself still needs the laptop |
-| 7 | **Statutes only.** No case law, rules, SROs or gazette notifications, which is where much practical law lives | medium | open: state the scope on the page; add rules/SROs if bdlaws exposes them |
+| 7 | **Statutes only.** No case law, rules, SROs or gazette notifications, which is where much practical law lives | medium | partly done 2026-10-27: the page states the scope under the answer box; adding rules/SROs is still open |
 | 8 | **One laptop is the whole production.** No backup of `data/answers.sqlite3`, no uptime alert, no domain | medium | partly done 2026-10-27: `bdrag backup` (verified archives), the uptime workflow and SLO alert rules; hosting and a domain still open |
 | 9 | **Query and feedback logs grow forever** | low | **fixed 2026-10-27**: `BDRAG_LOG_DAYS` (90) and the privacy page says so |
 | 10 | **Known retrieval misses** (English question to a Bangla-only act; wording shared across many acts) | medium | open: laptop items #1 and #8 of [the last plan](next-upgrades-2026-10-21.md) |
@@ -53,7 +53,7 @@ bilingual UI with share, print, copy, history and feedback.
 
 | # | Idea | Effort | Needs | Why |
 |---|---|---|---|---|
-| 1 | Lawyer review of 50 answers, graded with a fixed rubric, results committed | M | a person | the only credible evidence the answers are right |
+| 1 | Lawyer review of 50 answers, graded with a fixed rubric, results committed (**kit done 2026-10-27: `bdrag review`; the grading itself still needs a person**) | M | a person | the only credible evidence the answers are right |
 | 2 | Check follow-up rewrites with gemma4:e4b on 20 real two-turn conversations | S | laptop | the rewrite prompt is untested on the small local model; a bad rewrite is shown to the user but still costs an answer |
 | 3 | Hosting: GPU or free hosted model, a domain, HTTPS, backups, uptime alert | M | money or accounts | latency and availability are what visitors judge first |
 | 4 | Monthly re-ingest with the index date shown on the page | S | laptop | stale law is a legal-safety problem |

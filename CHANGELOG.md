@@ -5,6 +5,24 @@ open is in [IMPROVEMENTS.md](IMPROVEMENTS.md).
 
 ## Unreleased
 
+### Lawyer review of the answers
+- **`bdrag review`**, the kit for the launch audit's top open item: nobody qualified had
+  read the answers. `bdrag review sheet <run>.answers.json --n 50` takes a sample balanced
+  across language and question type and writes `review.html`, a single page a reviewer
+  opens in any browser: the answer, the cited sections with links to bdlaws, the drafted
+  reference answer (marked as unchecked), and a five-question rubric in English and Bangla
+  (right law, right sections, accurate, safe, clear; "should it have answered" when the
+  service declined). Grades are kept in the browser as they go and come back as a CSV
+  from a Download button; `grades.csv` is the same sheet for a spreadsheet.
+- `bdrag review score grades.csv` reports each criterion with a 95% interval, by
+  language, lists every unsafe or inaccurate answer with the reviewer's notes, and exits
+  1 unless the launch bar is met: no answer unsafe, at least 85% fully accurate, at least
+  30 graded. `--judge-labels` hands the verdicts to `bdrag calibrate-judge`, so the
+  judge model is measured against a lawyer. Rubric for the reviewer:
+  [docs/review/RUBRIC.md](docs/review/RUBRIC.md).
+- The page now states the scope under the answer box: Acts from the Laws of Bangladesh
+  website only, no court decisions, rules, SROs or gazette notifications yet.
+
 ### Operations: retention, backups, freshness, alerts
 - **Retention for the logs.** The query and feedback logs hold visitors' questions and
   used to grow forever. Rows older than `BDRAG_LOG_DAYS` (90, the same as shared

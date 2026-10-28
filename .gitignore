@@ -17,3 +17,6 @@ results/finish.log
 build/
 dist/
 .env
+
+# bdrag review sheets: answers and a reviewer's grades, kept off GitHub until scored
+/review/

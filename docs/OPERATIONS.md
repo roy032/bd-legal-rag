@@ -198,6 +198,27 @@ distinct visitors, with the topic-table entry each matched. Questions matching n
 are the first candidates for `rag/topics.py`; `bdrag feedback-to-eval` turns them into
 eval drafts. The report holds what people asked; keep it private.
 
+### Before launch: a lawyer reads the answers
+
+On the laptop, answer the evaluation set with the model you will serve, then make the
+review sheet:
+
+```
+bdrag e2e --label review --no-judge --provider ollama --llm-model gemma4:e4b
+bdrag review sheet results/review.answers.json --n 50 --out review/
+```
+
+Send the reviewer `review/review.html` and [the rubric](review/RUBRIC.md). They grade in
+the browser and send back `grades.csv`; then
+
+```
+bdrag review score grades.csv --out docs/reports/lawyer-review.md --judge-labels data/eval/judge_labels.jsonl
+```
+
+exits 1 unless no answer is unsafe, at least 85% are fully accurate and at least 30 were
+graded. The sheet holds evaluation-set questions only, never visitors' questions; showing
+visitors' questions to a reviewer would need a line on the privacy page first.
+
 ## Container hardening
 
 The image runs as a non-root user. Run it with a read-only root filesystem, no Linux
