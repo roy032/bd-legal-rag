@@ -74,6 +74,8 @@ from service.answers import AnswerStore
 from service.backends import make_cache, make_limiter
 from service.cache import cache_key
 from service.cost import estimate_cost, project_monthly
+from service.coverage import coverage_data
+from service.coverage import render as render_coverage
 from service.logs import request_id as request_id_var
 from service.logs import safe_request_id
 from service.metrics import Metrics
@@ -201,6 +203,9 @@ class ServiceConfig:
     # a number sets the cosine threshold. Overlap: share of top-5 sections in common.
     semantic_cache: str = "auto"
     semantic_overlap: float = 0.6
+    # The /coverage page: hand-written known gaps, and the list `bdrag gaps --public` writes.
+    known_gaps_path: str = "data/coverage/known_gaps.json"
+    public_gaps_path: str = "data/coverage/public_gaps.json"
 
     @classmethod
     def from_env(cls) -> ServiceConfig:
@@ -255,6 +260,8 @@ class ServiceConfig:
             feedback_path=_env_str("BDRAG_FEEDBACK", "data/feedback.jsonl"),
             analytics_path=_env_str("BDRAG_ANALYTICS", "data/queries.jsonl"),
             answers_path=_env_str("BDRAG_ANSWERS_DB", "data/answers.sqlite3"),
+            known_gaps_path=_env_str("BDRAG_KNOWN_GAPS", "data/coverage/known_gaps.json"),
+            public_gaps_path=_env_str("BDRAG_PUBLIC_GAPS", "data/coverage/public_gaps.json"),
             answer_days=_env_float("BDRAG_ANSWER_DAYS", 90.0) or 0.0,
             log_days=_env_float("BDRAG_LOG_DAYS", 90.0) or 0.0,
             housekeeping_s=_env_float("BDRAG_HOUSEKEEPING_S", 6 * 3600.0) or 6 * 3600.0,
@@ -1154,9 +1161,23 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
     async def privacy_page(request: Request):
         return FileResponse(STATIC / "privacy.html")
 
+    def coverage_snapshot() -> dict:
+        # Counted from the records the pipeline already holds; never loads them itself,
+        # so a crawler on /coverage cannot make a cold service read the whole index.
+        return coverage_data(state["records"], index_built_at(cfg.index),
+                             cfg.known_gaps_path, cfg.public_gaps_path)
+
+    async def coverage_page(request: Request):
+        data = await run_in_threadpool(coverage_snapshot)
+        if "application/json" in request.headers.get("accept", "") or \
+                request.query_params.get("format") == "json":
+            return JSONResponse(data)
+        return HTMLResponse(render_coverage(data))
+
     async def robots(request: Request):
         # Shared answers hold what visitors asked; the API is not content.
-        return PlainTextResponse("User-agent: *\nAllow: /$\nAllow: /privacy\nAllow: /static/\n"
+        return PlainTextResponse("User-agent: *\nAllow: /$\nAllow: /privacy\nAllow: /coverage\n"
+                                 "Allow: /static/\n"
                                  "Disallow: /a/\nDisallow: /ask\nDisallow: /search\n"
                                  "Disallow: /metrics\nDisallow: /stats\n")
 
@@ -1176,6 +1197,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         Route("/", index_page),
         Route("/privacy", privacy_page),
         Route("/terms", privacy_page),
+        Route("/coverage", coverage_page),
         Route("/robots.txt", robots),
         Route("/manifest.webmanifest", manifest),
         Route("/health", health),

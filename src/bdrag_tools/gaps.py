@@ -11,9 +11,16 @@ entry in rag/topics.py (or a missing act in the index) pays off first.
   bdrag gaps                                          # data/queries.jsonl + data/feedback.jsonl
   bdrag gaps --since 2026-10-01 --out results/gaps.md
   bdrag gaps --json results/gaps.json --top 50
+  bdrag gaps --public data/coverage/public_gaps.json   # for the /coverage page
 
 Questions are already redacted for phone, NID and card numbers by the service.
 The report still holds what people asked: keep it out of public places.
+
+--public writes the one part that may be published, for the service's
+"What we can't answer yet" page (/coverage): only questions that at least
+--min-visitors different visitors asked (default 3, so no one person's question
+is shown), redacted again, clipped, with no comments, dates or counts per visitor.
+Read the file before you deploy it; drop any line that still says too much.
 """
 from __future__ import annotations
 
@@ -24,6 +31,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from ingest.textutils import nfc
+from rag.pii import redact
 from rag.query import script_language
 from rag.topics import match_topics
 
@@ -152,6 +160,28 @@ def markdown(report: dict, top: int = 30) -> str:
     return "\n".join(lines)
 
 
+def public_report(report: dict, min_visitors: int = 3, top: int = 50,
+                  max_chars: int = 200) -> dict:
+    """The publishable part of a report: questions several different visitors asked."""
+    items = []
+    for g in report["gaps"]:
+        if g["visitors"] < min_visitors:
+            continue
+        question = " ".join(redact(g["question"])[0].split())
+        if len(question) > max_chars:
+            question = question[:max_chars].rsplit(" ", 1)[0] + " …"
+        why = "unanswered" if {"refused", "general guidance"} & set(g["reasons"]) else "answered badly"
+        items.append({"question": question, "language": g["language"], "why": why,
+                      "topics": g["topics"], "visitors": g["visitors"]})
+        if len(items) >= top:
+            break
+    s = report["summary"]
+    return {"generated": time.strftime("%Y-%m-%d", time.gmtime()), "min_visitors": min_visitors,
+            "summary": {"answers": s["answers"], "refused": s["refused"],
+                        "general_guidance": s["general_guidance"]},
+            "questions": items}
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="bdrag gaps", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -161,6 +191,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--top", type=int, default=30)
     ap.add_argument("--out", help="write the markdown report here instead of printing it")
     ap.add_argument("--json", help="also write the full report as JSON")
+    ap.add_argument("--public", help="also write the publishable list for /coverage here")
+    ap.add_argument("--min-visitors", type=int, default=3,
+                    help="--public: a question appears only after this many different visitors asked it")
     args = ap.parse_args(argv)
     report = analyse(read_jsonl(args.queries), read_jsonl(args.feedback), _since(args.since))
     text = markdown(report, args.top)
@@ -173,6 +206,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         Path(args.json).parent.mkdir(parents=True, exist_ok=True)
         Path(args.json).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    if args.public:
+        pub = public_report(report, max(args.min_visitors, 2), args.top)
+        Path(args.public).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.public).write_text(json.dumps(pub, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"wrote {args.public}: {len(pub['questions'])} questions asked by "
+              f">= {pub['min_visitors']} visitors. Read it before you deploy it.")
     return 0
 
 

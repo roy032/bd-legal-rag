@@ -72,6 +72,8 @@ def embed_with_reuse(chunks: list[dict], embedder, out: Path, checkpoint_every: 
 
 
 PDF_CHUNKS = Path("data/processed/pdf_chunks.jsonl")
+# Rules, SROs and judgments from `bdrag sources ingest`.
+SOURCE_CHUNKS = Path("data/processed/source_chunks.jsonl")
 
 
 def load_chunks(path: Path | list[Path]) -> list[dict]:
@@ -88,7 +90,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--chunks", nargs="+", default=None,
                     help="chunk file(s); default data/processed/chunks.jsonl, plus "
-                         "pdf_chunks.jsonl from `bdrag pdf` when it exists")
+                         "pdf_chunks.jsonl (`bdrag pdf`) and source_chunks.jsonl "
+                         "(`bdrag sources`) when they exist")
     ap.add_argument("--out", default="data/index")
     ap.add_argument("--embedder", choices=["st", "hashing"], default="st")
     ap.add_argument("--model", default="BAAI/bge-m3")
@@ -108,8 +111,8 @@ def main() -> None:
     args = ap.parse_args()
 
     paths = [Path(p) for p in args.chunks] if args.chunks else [Path("data/processed/chunks.jsonl")]
-    if args.chunks is None and PDF_CHUNKS.exists():
-        paths.append(PDF_CHUNKS)
+    if args.chunks is None:
+        paths += [p for p in (PDF_CHUNKS, SOURCE_CHUNKS) if p.exists()]
     chunks = load_chunks(paths)
     print(f"{len(chunks)} chunks from {', '.join(map(str, paths))}")
 

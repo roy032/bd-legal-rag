@@ -5,6 +5,35 @@ open is in [IMPROVEMENTS.md](IMPROVEMENTS.md).
 
 ## Unreleased
 
+### Law beyond the Acts, and an honest list of what is missing
+- **`bdrag sources`**: rules, regulations, SROs, orders and Supreme Court judgments,
+  listed one per line in [data/sources/manifest.jsonl](data/sources/manifest.jsonl) and
+  only from government hosts (`*.gov.bd`; a Scribd or blog copy is refused).
+  `discover` adds the judgments the Supreme Court lists on supremecourt.gov.bd, `fetch`
+  downloads politely into `data/raw/sources/`, `ingest` writes
+  `data/processed/source_chunks.jsonl`, which `bdrag index` now picks up by default,
+  and `check` validates the manifest. The manifest starts with 16 recent judgments
+  (8 High Court Division, 8 Appellate Division): 15 ingest to 280 chunks in a cloud run.
+- **Judgments** (`ingest/judgment.py`) get an overview chunk (cause title and opening)
+  and page-anchored body chunks, cited as "First Appeal No. 311 of 2016 (HCD), p. 5" and
+  linked to `…pdf#page=5`. The case number comes from the court's list when it is well
+  formed and from the cause title otherwise (the list has typos like "311/20116"); the
+  date is the judgment's own, never "the judgment and order dated" appealed from.
+- **Rules and SROs** go through the PDF path and are cited as what they are: "বিধি 5" /
+  "rule 5", not "section 5". Every chunk now carries `doc_type`; the excerpt header the
+  model reads says `[COURT JUDGMENT, 2026-08-25]` or `[RULE under <act>]`, the source card
+  shows a badge, and live re-verification against bdlaws skips non-Act sources.
+- **`/coverage`**, "What we can't answer yet", linked from the footer and the privacy
+  page: what the index holds by kind (acts, rules, judgments) and when it was built,
+  hand-written known gaps in both languages
+  ([data/coverage/known_gaps.json](data/coverage/known_gaps.json)), and the questions
+  visitors asked that the service could not answer. That list comes from
+  `bdrag gaps --public data/coverage/public_gaps.json`: only questions at least 3
+  different visitors asked, redacted again, no comments or dates; the file stays out of
+  git and the operator reads it before deploying. The privacy page says so (updated
+  28 October 2026). `GET /coverage` with `Accept: application/json` returns the same data.
+- The scope line under the answer box now points to the coverage page.
+
 ### Lawyer review of the answers
 - **`bdrag review`**, the kit for the launch audit's top open item: nobody qualified had
   read the answers. `bdrag review sheet <run>.answers.json --n 50` takes a sample balanced

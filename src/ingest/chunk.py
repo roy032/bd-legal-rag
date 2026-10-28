@@ -23,8 +23,26 @@ SUBSECTION_START = re.compile(nfc(
 SENTENCE_END = re.compile(r"(?<=[।.;])\s+")
 
 
+# What one numbered unit is called in each kind of document. A rule is cited
+# "rule 5", not "section 5", and a lawyer reading "section 5" of a rules book
+# would look in the parent act.
+UNIT_LABELS = {
+    "act": ("ধারা", "Section"),
+    "rule": ("বিধি", "Rule"),
+    "regulation": ("প্রবিধান", "Regulation"),
+    "sro": ("অনুচ্ছেদ", "Paragraph"),
+    "order": ("অনুচ্ছেদ", "Paragraph"),
+    "judgment": ("পৃষ্ঠা", "Page"),
+}
+
+
+def unit_label(doc_type: str | None, language: str | None) -> str:
+    bn, en = UNIT_LABELS.get(doc_type or "act", UNIT_LABELS["act"])
+    return bn if language == "bn" else en
+
+
 def _header(act: Act, sec: Section) -> str:
-    label = "ধারা" if act.language == "bn" else "Section"
+    label = unit_label(getattr(act, "doc_type", "act"), act.language)
     parts = [act.title]
     if sec.chapter:
         parts.append(sec.chapter)
@@ -110,6 +128,7 @@ def chunk_section(act: Act, sec: Section, max_chars: int = 1800) -> list[Chunk]:
                 body=body,
                 metadata={
                     "type": "section",
+                    "doc_type": getattr(act, "doc_type", "act"),
                     "act_id": act.act_id,
                     "act_title": act.title,
                     "act_number": act.act_number,
@@ -176,6 +195,7 @@ def act_overview_chunk(act: Act, max_chars: int = 3000) -> Chunk:
         body=body,
         metadata={
             "type": "act_overview",
+            "doc_type": getattr(act, "doc_type", "act"),
             "act_id": act.act_id,
             "act_title": act.title,
             "act_number": act.act_number,

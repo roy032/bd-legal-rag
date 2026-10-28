@@ -35,7 +35,9 @@ def _flat(text: str) -> str:
 def verify_hit(hit: Hit, fetcher: Fetcher) -> str:
     m = hit.metadata
     url = m.get("url")
-    if m.get("type") != "section" or not url:
+    # Only bdlaws section pages can be re-read and compared; rules, SROs and
+    # judgments are PDFs.
+    if m.get("type") != "section" or not url or m.get("doc_type", "act") != "act":
         return "unavailable"
     ref = SectionRef(section_id=int(m["section_id"]), number=str(m.get("section_number") or ""),
                      number_ascii=str(m.get("section_number_ascii") or ""),

@@ -1,0 +1,17 @@
+{
+  "_note": "Hand-written. Shown on /coverage under 'Known gaps'. Keep each line true of the index you deploy; remove a line when its gap is filled.",
+  "gaps": [
+    {"en": "Most rules (বিধিমালা), regulations and SROs made under the Acts are not included yet. They decide many practical details: fees, forms, deadlines and which office to go to.",
+     "bn": "আইনের অধীনে প্রণীত বেশিরভাগ বিধিমালা, প্রবিধানমালা ও এসআরও এখনো যুক্ত হয়নি। ফি, ফরম, সময়সীমা ও কোন অফিসে যেতে হবে, এমন অনেক খুঁটিনাটি সেগুলোতেই থাকে।"},
+    {"en": "Court judgments are limited to a small, recent set published on supremecourt.gov.bd (the table above shows how many). Older reported cases (DLR, BLD, BLC) are not, so the service cannot tell you how courts have usually read a provision.",
+     "bn": "আদালতের রায় বলতে শুধু supremecourt.gov.bd-তে প্রকাশিত সাম্প্রতিক কিছু রায় (কতগুলো, তা ওপরের সারণিতে)। পুরনো প্রকাশিত মামলা (DLR, BLD, BLC) নেই, তাই আদালত সাধারণত কোনো ধারা কীভাবে ব্যাখ্যা করে তা এই সেবা বলতে পারে না।"},
+    {"en": "Gazette notifications that change a date, a rate or an amount (for example tax rates, minimum wages, court fees) are mostly missing. Check the latest Bangladesh Gazette.",
+     "bn": "যেসব গেজেট প্রজ্ঞাপন তারিখ, হার বা পরিমাণ বদলায় (যেমন করের হার, ন্যূনতম মজুরি, কোর্ট ফি) সেগুলোর বেশিরভাগ নেই। সর্বশেষ বাংলাদেশ গেজেট দেখুন।"},
+    {"en": "Some older Acts exist only as scanned images on the official site, and their text is not searchable here yet.",
+     "bn": "কিছু পুরনো আইন সরকারি সাইটে শুধু স্ক্যান করা ছবি হিসেবে আছে; সেগুলোর পাঠ এখানে এখনো খোঁজা যায় না।"},
+    {"en": "The text follows the official site, which can lag behind a new amendment. Each answer links the official page; check it before you act.",
+     "bn": "পাঠ সরকারি সাইট অনুসরণ করে, যা নতুন সংশোধনী যোগ করতে দেরি করতে পারে। প্রতিটি উত্তরে সরকারি পাতার লিংক আছে; কিছু করার আগে মিলিয়ে নিন।"},
+    {"en": "Personal law questions that depend on religious law not written in an Act (for example details of Muslim inheritance shares or Hindu succession) are only partly covered.",
+     "bn": "যেসব ব্যক্তিগত আইনের প্রশ্ন আইনে লেখা নয় এমন ধর্মীয় বিধানের ওপর নির্ভর করে (যেমন মুসলিম উত্তরাধিকারের অংশের খুঁটিনাটি বা হিন্দু উত্তরাধিকার), সেগুলো আংশিকভাবে আছে।"}
+  ]
+}

@@ -114,6 +114,7 @@ def source_card(n: int, h: Hit, max_chars: int = 1200) -> dict:
     return {"n": n, "citation": h.citation, "url": m.get("url"), "score": round(h.score, 4),
             "section_title": m.get("section_title"), "act_title": m.get("act_title"),
             "amended": amendment_label(m), "repealed": bool(m.get("repealed")),
+            "doc_type": m.get("doc_type") or "act", "decided": m.get("decided"),
             "text": h.body[:max_chars]}
 
 
@@ -139,6 +140,13 @@ def format_context(hits: list[Hit], max_chars: int | None = None) -> str:
             head += f" [{label}]"
         if m.get("repealed"):
             head += " [REPEALED ACT]"
+        # Rules and judgments are not the act itself: say what each one is, so the
+        # answer can say "the rules set the fee" or "the High Court held".
+        kind = m.get("doc_type") or "act"
+        if kind == "judgment":
+            head += f" [COURT JUDGMENT{', ' + m['decided'] if m.get('decided') else ''}]"
+        elif kind != "act":
+            head += f" [{kind.upper()}" + (f" under {m['parent_act']}" if m.get("parent_act") else "") + "]"
         body = h.body[:max_chars]
         blocks.append(f"{head}\n{body}")
     return "\n\n".join(blocks)
