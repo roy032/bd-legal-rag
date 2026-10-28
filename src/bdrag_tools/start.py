@@ -48,6 +48,13 @@ def private_env(env: Mapping[str, str], model: str, offline: bool) -> dict[str, 
     out.update({"RAG_LLM": "ollama", "RAG_MODEL": model, "OLLAMA_HOST": LOCAL_OLLAMA,
                 "PYTHONUTF8": "1"})
     out.setdefault("OLLAMA_KEEP_ALIVE", "30m")      # keep the model loaded between questions
+    # A laptop CPU reads a prompt at tens of tokens a second, so every extra model
+    # call and every excerpt character is seconds the visitor waits. Each of these
+    # can still be set in the environment to override it.
+    out.setdefault("RAG_LLM_TIMEOUT", "300")        # reading 5 Bangla excerpts can pass 120 s
+    out.setdefault("RAG_EXCERPT_CHARS", "1000")
+    out.setdefault("BDRAG_AGENT_AUTO", "false")     # the agent makes up to 5 model calls
+    out.setdefault("BDRAG_REWRITE", "none")         # two extra calls when it fires
     if offline:
         out.update({"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"})
     return out
