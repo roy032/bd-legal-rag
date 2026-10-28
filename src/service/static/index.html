@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="en">
+<html lang="bn">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Bangladesh Law Assistant · বাংলাদেশ আইন সহায়ক</title>
-<meta name="description" content="Ask questions about the laws of Bangladesh in Bangla or English and get answers grounded in the statutory text, with the section cited.">
+<meta name="description" content="Ask about the laws of Bangladesh in Bangla (or English) and get answers grounded in the statutory text, with the section cited. Free and open source; runs on your own computer with a local model.">
 <meta property="og:title" content="Bangladesh Law Assistant · বাংলাদেশ আইন সহায়ক">
 <meta property="og:description" content="Free answers about Bangladeshi law in Bangla or English, every claim cited to the section of the Act.">
 <meta name="theme-color" content="#0b4f3a">
@@ -16,7 +16,8 @@
   // Theme and language before first paint, so the page never flashes the wrong one.
   try {
     const t = localStorage.getItem("bdrag-theme"); if (t) document.documentElement.dataset.theme = t;
-    const l = localStorage.getItem("bdrag-lang") || ((navigator.language || "").startsWith("bn") ? "bn" : "en");
+    // Bangla first: English only for a visitor who picked it.
+    const l = localStorage.getItem("bdrag-lang") === "en" ? "en" : "bn";
     document.documentElement.lang = l;
   } catch (e) {}
 </script>
@@ -43,7 +44,7 @@
 
 <section class="hero">
   <div class="wrap narrow">
-    <p class="eyebrow" data-i18n="eyebrow">Free · Bangla & English · Cited to the section</p>
+    <p class="eyebrow" data-i18n="eyebrow">Bangla first, English too · Free · Cited to the section</p>
     <h1 data-i18n="h1">Ask about Bangladeshi law, in Bangla or English</h1>
     <p class="lead" data-i18n="lead">Ask what a section says, or describe your situation. Answers come from the text of the Acts, with every claim linked to the section it relies on.</p>
 
@@ -64,6 +65,8 @@
             <span id="hosted" class="hosted" hidden data-i18n="hosted">Your question is sent to an outside provider.</span>
           </div>
         </details>
+        <button type="button" class="chip plaintoggle" id="plain" aria-pressed="false" title="Short sentences and everyday words; legal terms explained">
+          <svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 5h16v2H4zm0 6h10v2H4zm0 6h13v2H4z"/></svg><span data-i18n="plain">Plain language</span></button>
         <span class="count" id="count" aria-live="polite"></span>
         <span class="kbd" aria-hidden="true" data-i18n="enterhint">Enter to ask · Shift+Enter for a new line</span>
         <button type="button" class="ghost" id="stop" hidden data-i18n="stop">Stop</button>
@@ -78,6 +81,7 @@
       <li><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5 3h10l4 4v14H5zm9 1.5V8h3.5"/></svg><span id="corpusline" data-i18n="trust1">From the official text of Bangladeshi Acts</span></li>
       <li><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg><span data-i18n="trust2">Every claim cited to a section</span></li>
       <li><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2 4 5v6c0 5 3.4 9.7 8 11 4.6-1.3 8-6 8-11V5z"/></svg><span data-i18n="trust3">Free, no sign-up</span></li>
+      <li id="privline" hidden><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 1a5 5 0 0 0-5 5v3H5v14h14V9h-2V6a5 5 0 0 0-5-5zm-3 5a3 3 0 0 1 6 0v3H9z"/></svg><a href="/about#private" id="privtext" data-i18n="trust4server">No outside AI company sees your question</a></li>
     </ul>
   </div>
 </section>
@@ -109,6 +113,20 @@
           <span class="glabel" data-i18n="glabel">General guidance — not from the indexed law text</span>
           <div class="prose" id="gtext"></div>
         </div>
+        <section id="verify" class="verify" hidden aria-label="How to check this answer" data-i18n-label="v_title"></section>
+
+        <section id="nextsteps" class="nextsteps" hidden aria-labelledby="nsh">
+          <div class="nshead">
+            <h3 id="nsh"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm-9 14-5-5 1.4-1.4 3.6 3.6 7.6-7.6L19 8z"/></svg><span data-i18n="ns_title">What to do next</span></h3>
+            <button type="button" class="linkbtn" id="nscopy" data-i18n="ns_copy">Copy checklist</button>
+          </div>
+          <ol class="checks" id="nslist"></ol>
+          <div id="nstipswrap"><h4 data-i18n="ns_tips">Practical tips</h4><ul class="tips" id="nstips"></ul></div>
+          <h4 data-i18n="ns_help">Free help</h4>
+          <ul class="helplist" id="nshelp"></ul>
+          <p class="nsnote" data-i18n="ns_note">Steps with a number in brackets come from the cited section. Tips and phone numbers are general and are not taken from the law.</p>
+        </section>
+        <details id="glosswrap" class="gloss" hidden><summary data-i18n="gloss">Words in this answer, explained</summary><dl id="gloss"></dl></details>
         <details id="tracewrap" hidden class="trace"><summary data-i18n="trace">What the deeper search did</summary><ol id="trace"></ol></details>
         <footer class="actions" id="actions" hidden>
           <div class="fbgroup" role="group" aria-label="Feedback" data-i18n-label="l_feedback">
@@ -142,6 +160,11 @@
     <div class="aidtext">
       <b data-i18n="aid1">Need help with your own case?</b>
       <p data-i18n="aid2">Call the government's free legal aid hotline (National Legal Aid Services Organisation), toll-free, or visit the legal aid office at your district judge's court.</p>
+      <div class="district" id="districtwrap" hidden>
+        <label for="district" data-i18n="district">Your district's legal aid office</label>
+        <select id="district"></select>
+        <p class="office" id="office" aria-live="polite"></p>
+      </div>
     </div>
     <a class="phone" href="tel:16430"><span data-i18n="call">Call</span> 16430</a>
   </aside>
@@ -169,6 +192,8 @@
       <a href="http://bdlaws.minlaw.gov.bd/" target="_blank" rel="noopener" data-i18n="official">Laws of Bangladesh (official)</a>
       <a href="https://github.com/roy032/bd-legal-rag" target="_blank" rel="noopener" data-i18n="source">Source code</a>
       <a href="/accuracy" data-i18n="accuracy">How accurate is it?</a>
+      <a href="/sources" data-i18n="acts">Acts covered, with dates</a>
+      <a href="/about" data-i18n="about">About</a>
       <a href="/privacy" data-i18n="privacy">Privacy and terms</a>
     </div>
   </div>

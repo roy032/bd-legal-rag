@@ -12,6 +12,41 @@ Acts with the section cited — or an honest refusal when the corpus does not an
   <img src="docs/screenshots/v2-guidance.png" width="30%" alt="Labelled general guidance when the indexed laws do not answer">
 </p>
 
+## Bangla first, free, and private
+
+- **Bangla first.** Ask in Bangla, English or romanised Bangla (`dhara 302 e ki ache`); both
+  the Bangla and English texts are searched and the answer comes back in the language you
+  asked in. The page opens in Bangla, ships its own Bangla font, and the default answering
+  model, gemma4:e4b, was picked because it wrote the best Bangla of the small models tried.
+- **Free.** No paid AI service, no API key, no account. Open models run on an ordinary
+  laptop CPU; the code is MIT licensed.
+- **Private.** Run on your own computer, the question, the search and the answer never
+  leave it: the embedding model, the index and the answering model (Ollama on 127.0.0.1)
+  are all local, and the page loads nothing from other sites. This is checked rather than
+  promised: the service works out from its own settings whether anything would send a
+  question elsewhere (`service/privacy.py`), and the home page says "your question never
+  leaves it" only when nothing does. Turn on a hosted model and the page names the provider
+  instead; `bdrag doctor` prints the same check. More on the [about page](src/service/static/about.html)
+  (`/about` when running).
+
+### On Windows, one command
+
+Download the repository (Code → Download ZIP, or `git clone`), then double-click
+**`SETUP_WINDOWS.bat`**. It installs Python and Ollama with winget if they are missing,
+creates `.venv`, pulls gemma4:e4b, builds the law index (a 30-minute starter set of the Acts
+everyday questions rely on, or the full corpus overnight, or a download), and opens the
+assistant in your browser. Afterwards **`START_WINDOWS.bat`** starts it again. You need
+8 GB of RAM (16 GB is more comfortable) and about 20 GB of free disk; the internet is used
+only during setup.
+
+`START_WINDOWS.bat` runs `bdrag start`, which also works on macOS and Linux: it serves on
+127.0.0.1 only, answers with the local Ollama model, drops any setting that would send
+something off the machine (`BDRAG_MODELS`, `RAG_LLM_BASE_URL`, `REDIS_URL`,
+`BDRAG_OTEL_ENDPOINT`, `BDRAG_VERIFY_LIVE`) and, once the embedding model is cached, sets
+`HF_HUB_OFFLINE=1`.
+
+## How it works
+
 ```
                     ┌──────────── ingestion (offline) ───────────┐
  bdlaws.minlaw.gov.bd → parse Act/Chapter/Section → chunk + metadata → chunks.jsonl
@@ -112,14 +147,14 @@ Without a provider, the service returns retrieved provisions with HTTP 503 inste
 presenting an offline stub as a generated answer. Set `RAG_LLM=echo` explicitly when
 testing retrieval-only behavior.
 
-### On a laptop, free, in five commands
+### On a laptop (macOS, Linux or Windows by hand), free, in five commands
 
 ```bash
 pip install -e ".[serve,embed]"                         # once
 python scripts/sync_index.py pull --repo <you>/bdrag-index   # or copy data/index over
 ollama pull gemma4:e4b                                  # free local answering model
 bdrag doctor                                            # one line per check, with the fix
-RAG_LLM=ollama RAG_MODEL=gemma4:e4b bdrag serve         # http://localhost:8000
+bdrag start                                             # private: 127.0.0.1, local model
 ```
 
 `bdrag doctor` checks the index, the embedding model cache, the answering model
@@ -185,6 +220,7 @@ src/rag/           retrieval, prompts, guardrails, agent, topics, CLI (`bdrag`)
 src/evalkit/       metrics, judge, failure taxonomy, reports
 src/service/       Starlette API + streaming web UI (static/)
 src/bdrag_tools/   the bdrag subcommands (index, eval, e2e, ablate, doctor, ...)
+SETUP_WINDOWS.bat  one-command Windows setup (scripts/setup_windows.ps1); START_WINDOWS.bat runs `bdrag start`
 scripts/           wrappers for the above, plus finish.py / kagglerun.py
 data/eval/         evaluation, tuning, scenario and adversarial question sets
 data/sample/       small corpus used by the tests, the demo and CI
@@ -201,6 +237,7 @@ tests/             offline test suite
 |---|---|
 | [docs/RUNBOOK_WINDOWS.md](docs/RUNBOOK_WINDOWS.md) | the full run on a Windows laptop, from downloaded pages to evaluated system |
 | [docs/OPERATIONS.md](docs/OPERATIONS.md) | running the service: probes, load shedding, circuit breaker, metrics, logs, alerts |
+| [docs/LEGAL_AID.md](docs/LEGAL_AID.md) | the "what to do next" checklist, plain-language mode, and the legal-aid numbers (to check before launch) |
 | [docs/DATA_CARD.md](docs/DATA_CARD.md) | what the corpus contains and leaves out |
 | [docs/adr/](docs/adr/) | design decisions, one file each |
 | [docs/BUILD_NOTES.md](docs/BUILD_NOTES.md) | the build log, phase by phase |

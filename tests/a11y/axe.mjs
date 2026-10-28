@@ -58,6 +58,9 @@ try {
     await audit(page, `privacy ${lang} ${theme}`);
     await page.goto(BASE + "/accuracy");
     await audit(page, `accuracy ${lang} ${theme}`);
+    await page.goto(BASE + "/about");
+    await page.waitForSelector("#status-en:not([hidden])", { timeout: 5000 }).catch(() => {});
+    await audit(page, `about ${lang} ${theme}`);
     await context.close();
   }
 

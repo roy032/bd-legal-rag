@@ -184,6 +184,24 @@ def _check_ollama(env: dict[str, str], model: str, get=None) -> Check:
                  f"ollama pull {model}")
 
 
+def check_privacy(env: dict[str, str] | None = None) -> Check:
+    """Whether a question would leave this machine with the current settings."""
+    from service.privacy import report
+
+    env = dict(os.environ if env is None else env)
+    specs = [m.strip() for m in env.get("BDRAG_MODELS", "").split(",") if m.strip()]
+    specs = specs or [f"{env.get('RAG_LLM') or 'echo'}:{env.get('RAG_MODEL', '')}"]
+    verify = env.get("BDRAG_VERIFY_LIVE", "").strip().lower() in ("1", "true", "yes", "on")
+    r = report(specs, verify, env)
+    if not r["outbound"]:
+        return Check("privacy", OK, "questions stay on this machine (no outside service is configured)")
+    where = "; ".join(f"{o['where']} gets {o['sends']}" for o in r["outbound"])
+    if r["private"]:
+        return Check("privacy", OK, f"questions stay on this machine ({where})")
+    return Check("privacy", WARN, f"questions leave this machine: {where}",
+                 "for a fully local setup use RAG_LLM=ollama with Ollama on 127.0.0.1")
+
+
 def check_ocr(lang: str = "ben+eng") -> Check:
     if not (_has("pytesseract") and (_has("pymupdf") or _has("fitz"))):
         return Check("pdf / ocr", WARN, "not installed (only for scripts/ingest_pdf.py)",
@@ -223,7 +241,7 @@ def run(index_dir: str | None = None, model: str | None = None) -> list[Check]:
         checks.append(age)
     if not hashing:
         checks.append(check_model_cache(model))
-    return [*checks, *check_llm(), check_ocr()]
+    return [*checks, *check_llm(), check_privacy(), check_ocr()]
 
 
 def main(argv: list[str] | None = None) -> int:

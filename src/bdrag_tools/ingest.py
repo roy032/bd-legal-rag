@@ -177,6 +177,7 @@ def main() -> None:
             langs[act.language] += 1
 
             chunks = [act_overview_chunk(act)]
+            chunks[0].metadata["fetched"] = fetcher.fetched_on(f"{BASE_URL}/act-{act_id}.html")
             for ref in act.sections:
                 try:
                     sec = parse_section(fetcher.get(ref.url, refresh=act_id in refresh), ref, act)
@@ -192,7 +193,10 @@ def main() -> None:
                 stats["sections_amended"] += bool(sec.footnotes)
                 stats["sections_omitted"] += sec.omitted
                 fs.write(json.dumps(asdict(sec), ensure_ascii=False) + "\n")
-                chunks.extend(chunk_section(act, sec, max_chars=args.max_chars))
+                fetched = fetcher.fetched_on(ref.url)
+                for c in chunk_section(act, sec, max_chars=args.max_chars):
+                    c.metadata["fetched"] = fetched
+                    chunks.append(c)
             for c in chunks:
                 fc.write(json.dumps(c.to_dict(), ensure_ascii=False) + "\n")
                 lengths.append(c.metadata["char_len"])

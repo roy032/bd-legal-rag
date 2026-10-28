@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Acts covered · Bangladesh Law Assistant</title>
+<meta name="description" content="Every Act the Bangladesh Law Assistant answers from, with its official page, the newest amendment it reflects and the day the text was copied.">
+<meta name="theme-color" content="#0b4f3a">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="stylesheet" href="/static/app.css">
+<script>
+  try {
+    const t = localStorage.getItem("bdrag-theme"); if (t) document.documentElement.dataset.theme = t;
+    if (localStorage.getItem("bdrag-lang") === "bn") document.documentElement.lang = "bn";
+  } catch (e) {}
+</script>
+<style>
+  .legal { max-width: 960px; margin: 0 auto; padding: 32px 16px 64px; line-height: 1.6; }
+  .legal h1 { font-size: clamp(24px, 3vw, 32px); margin: 0 0 6px; }
+  .legal nav { display: flex; gap: 8px 18px; flex-wrap: wrap; margin: 0 0 8px; font-size: 15px; }
+  .legal .lead { color: var(--ink-2); margin: 0 0 16px; }
+  .legal .meta { color: var(--muted); font-size: 14px; margin: 0 0 16px; }
+  .legal input[type=search] { width: 100%; font: inherit; padding: 10px 12px; border-radius: 10px;
+    border: 1px solid var(--line-2); background: var(--panel); color: var(--ink); margin: 0 0 12px; }
+  .acts { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+  .acts li { padding: 12px 2px; border-bottom: 1px solid var(--line); display: grid; gap: 2px; }
+  .acts .t { font-weight: 650; overflow-wrap: anywhere; }
+  .acts .d { color: var(--muted); font-size: 13.5px; }
+  .acts .rep .t { text-decoration: line-through; text-decoration-color: var(--bad); }
+  .legal [hidden] { display: none; }
+</style>
+</head>
+<body>
+<main class="legal">
+  <nav aria-label="Page links"><a href="/" id="home">← Bangladesh Law Assistant</a></nav>
+  <h1 id="h1">Acts covered</h1>
+  <p class="lead" id="lead">Every answer quotes one of these Acts. Each links to its official page on the Laws of
+    Bangladesh website, with the newest amendment our copy reflects and the day the text was copied. If an Act
+    was amended after that day, the answer may quote old text: check the official page.</p>
+  <p class="meta" id="meta" aria-live="polite">Loading…</p>
+  <label for="filter" class="sr" id="flabel">Filter Acts by name or year</label>
+  <input type="search" id="filter" placeholder="Filter by name or year, e.g. Penal Code, ২০১০">
+  <ul class="acts" id="acts"></ul>
+  <p class="meta" id="more" hidden></p>
+</main>
+<script>
+"use strict";
+(() => {
+  const bn = document.documentElement.lang === "bn";
+  const $ = id => document.getElementById(id);
+  const esc = v => String(v ?? "").replace(/[&<>"']/g, c =>
+    ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+  const BN = "০১২৩৪৫৬৭৮৯", toBn = s => String(s).replace(/\d/g, d => BN[d]);
+  const ascii = s => String(s).replace(/[০-৯]/g, d => BN.indexOf(d));
+  const num = n => bn ? toBn(n) : String(n);
+  const day = d => {
+    const x = new Date(String(d) + "T00:00:00Z");
+    return isNaN(x) ? String(d) : x.toLocaleDateString(bn ? "bn-BD" : "en-GB",
+      {year: "numeric", month: "long", day: "numeric", timeZone: "UTC"});
+  };
+  const T = bn ? {
+    h1: "অন্তর্ভুক্ত আইন", home: "← বাংলাদেশ আইন সহায়ক",
+    lead: "প্রতিটি উত্তর এই আইনগুলোর কোনো একটি থেকে উদ্ধৃত। প্রতিটির পাশে Laws of Bangladesh ওয়েবসাইটের সরকারি পাতার লিংক, আমাদের কপিতে থাকা সর্বশেষ সংশোধনের বছর এবং পাঠটি কবে নেওয়া হয়েছে তা দেওয়া আছে। সেদিনের পর আইন সংশোধিত হলে উত্তরে পুরোনো পাঠ থাকতে পারে: সরকারি পাতা দেখে নিন।",
+    filter: "আইনের নাম বা বছর দিয়ে খুঁজুন, যেমন দণ্ডবিধি, ২০১০", flabel: "নাম বা বছর দিয়ে আইন খুঁজুন",
+    meta: (n, d) => `${toBn(n)}টি আইন` + (d ? ` · সূচি তৈরি ${day(d)}` : ""),
+    sections: n => `${toBn(n)}টি ধারা`, amended: y => `সর্বশেষ সংশোধন ${toBn(y)}`,
+    fetched: d => `সরকারি সাইট থেকে নেওয়া ${day(d)}`, index: d => `এই সূচিতে আছে ${day(d)} থেকে`,
+    repealed: "রহিত", more: n => `আরও ${toBn(n)}টি; খুঁজে দেখুন।`, none: "কিছু মেলেনি।",
+    error: "তালিকাটি এখন পাওয়া যাচ্ছে না।",
+  } : {
+    h1: "Acts covered", home: "← Bangladesh Law Assistant", lead: null, filter: null, flabel: null,
+    meta: (n, d) => `${n.toLocaleString("en")} Acts` + (d ? ` · index built ${day(d)}` : ""),
+    sections: n => `${n} sections`, amended: y => `last amended ${y}`,
+    fetched: d => `copied from the official site on ${day(d)}`, index: d => `in this index since ${day(d)}`,
+    repealed: "repealed", more: n => `${n.toLocaleString("en")} more; filter to find one.`, none: "Nothing matches.",
+    error: "The list is not available right now.",
+  };
+  $("h1").textContent = T.h1; $("home").textContent = T.home;
+  if (T.lead) $("lead").textContent = T.lead;
+  if (T.filter) $("filter").placeholder = T.filter;
+  if (T.flabel) $("flabel").textContent = T.flabel;
+  const SHOW = 300;                   // a long list is filtered, not scrolled
+  let ACTS = [];
+
+  function row(a) {
+    const bits = [];
+    if (a.year) bits.push(num(a.year));
+    if (a.sections) bits.push(T.sections(a.sections));
+    if (a.last_amended) bits.push(T.amended(a.last_amended));
+    if (a.as_of) bits.push((a.as_of_kind === "fetched" ? T.fetched : T.index)(a.as_of));
+    if (a.repealed) bits.push(T.repealed);
+    const title = /^https?:\/\//i.test(a.url || "")
+      ? `<a class="t" href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.title)} ↗</a>`
+      : `<span class="t">${esc(a.title)}</span>`;
+    return `<li class="${a.repealed ? "rep" : ""}">${title}<span class="d">${esc(bits.join(" · "))}</span></li>`;
+  }
+  function show() {
+    const q = ascii($("filter").value.trim().toLowerCase());
+    const hits = q ? ACTS.filter(a => ascii(`${a.title} ${a.year || ""} ${a.act_number || ""}`).toLowerCase().includes(q)) : ACTS;
+    $("acts").innerHTML = hits.slice(0, SHOW).map(row).join("");
+    $("more").hidden = hits.length > SHOW ? false : !!hits.length;
+    $("more").textContent = hits.length > SHOW ? T.more(hits.length - SHOW) : T.none;
+  }
+  $("filter").addEventListener("input", show);
+  fetch("/acts").then(r => r.ok ? r.json() : Promise.reject(r.status)).then(d => {
+    ACTS = d.acts || [];
+    $("meta").textContent = T.meta(d.count ?? ACTS.length, (d.index_built_at || "").slice(0, 10));
+    show();
+  }).catch(() => { $("meta").textContent = T.error; });
+})();
+</script>
+</body>
+</html>
