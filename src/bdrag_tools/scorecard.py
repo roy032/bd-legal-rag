@@ -25,6 +25,10 @@ from pathlib import Path
 
 from evalkit import scorecard as sc
 
+# At the top, not in check(): the scripts/ shim falls back to src/ only when this
+# module's own import fails (scripts/ingest.py otherwise shadows the ingest package).
+from evalkit.redteam import load_set, static_failures, summarize
+
 
 def render(card: dict) -> list[str]:
     """Write the Markdown page and the README block; return the files that changed."""
@@ -66,8 +70,6 @@ def check(card: dict) -> list[str]:
         problems.append(str(e))
     block = card["blocks"].get("redteam")
     if block:
-        from evalkit.redteam import load_set, static_failures, summarize
-
         items = load_set(sc.ROOT / "data" / "eval" / "redteam.jsonl")
         today = summarize([{"id": it.id, "attack": it.attack, "failures": static_failures(it)}
                            for it in items])
