@@ -3,8 +3,8 @@ service/privacy.py decides it from the settings, and the page, /about and
 `bdrag doctor` only repeat what it found."""
 import sys
 import unittest
+import unittest.mock
 from pathlib import Path
-from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -104,7 +104,7 @@ class TestPrivacyOnThePage(unittest.TestCase):
                                      pipeline=pipeline, llm=llm, stream_llm=stream))
 
     def test_health_reports_a_local_setup_as_private(self):
-        with mock.patch.dict("os.environ", {}, clear=False) as env:
+        with unittest.mock.patch.dict("os.environ", {}, clear=False) as env:
             for k in ("OLLAMA_HOST", "REDIS_URL", "BDRAG_OTEL_ENDPOINT", "RAG_LLM_BASE_URL"):
                 env.pop(k, None)
             h = self.client(models=["ollama:gemma4:e4b"]).get("/health").json()
@@ -113,14 +113,14 @@ class TestPrivacyOnThePage(unittest.TestCase):
         self.assertFalse(h["same_machine"])           # the test client is not 127.0.0.1
 
     def test_health_names_a_hosted_model(self):
-        with mock.patch.dict("os.environ", {"GROQ_API_KEY": "k"}):
+        with unittest.mock.patch.dict("os.environ", {"GROQ_API_KEY": "k"}):
             h = self.client(models=["ollama:gemma4:e4b", "groq:llama-3.3-70b-versatile"]).get("/health").json()
         self.assertFalse(h["private"])
         self.assertEqual(h["outbound"][0]["where"], "api.groq.com")
         self.assertNotIn("k", [v for o in h["outbound"] for v in o.values()])
 
     def test_remote_compat_server_is_flagged_in_the_picker(self):
-        with mock.patch.dict("os.environ", {"RAG_LLM_BASE_URL": "https://llm.example.org/v1"}):
+        with unittest.mock.patch.dict("os.environ", {"RAG_LLM_BASE_URL": "https://llm.example.org/v1"}):
             models = self.client(models=["ollama:gemma4:e4b", "compat:qwen"]).get("/models").json()["models"]
         self.assertEqual([m["local"] for m in models], [True, False])
 
