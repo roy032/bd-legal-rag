@@ -250,10 +250,10 @@ def headline(card: dict) -> list[tuple[str, str, str]]:
 def markdown(card: dict) -> str:
     out = ["# How accurate is it?", "",
            "<!-- Written by `bdrag scorecard render` from src/service/static/scorecard.json; "
-           "edit that file's notes or add a result with `bdrag scorecard add`, not this page. -->",
+           + "edit that file's notes or add a result with `bdrag scorecard add`, not this page. -->",
            "", card["intro"], "",
            f"Corpus: {card['corpus']}. Scorecard updated {card['updated']}. The same page is "
-           "served by the app at `/accuracy`, and the numbers as JSON at `/static/scorecard.json`.",
+           + "served by the app at `/accuracy`, and the numbers as JSON at `/static/scorecard.json`.",
            ""]
     for kind, (heading, bn, what, cmd) in KINDS.items():
         b = card["blocks"].get(kind)
@@ -287,7 +287,7 @@ def readme_block(card: dict) -> str:
     rows += [f"| {a} | {b} | {c} |" for a, b, c in headline(card)]
     return "\n".join([START, "", *rows, "",
                       "Every number, its 95% interval, the command that produced it and the gaps: "
-                      "[docs/ACCURACY.md](docs/ACCURACY.md) (the app shows it at `/accuracy`).",
+                      + "[docs/ACCURACY.md](docs/ACCURACY.md) (the app shows it at `/accuracy`).",
                       "", END])
 
 
