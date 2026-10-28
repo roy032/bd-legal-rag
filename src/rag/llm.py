@@ -34,6 +34,10 @@ OLLAMA_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX") or "8192")
 # costs 10-30 s, paid by whoever asks next. Keep it loaded for half an hour.
 # num_ctx stays fixed on purpose: changing it between calls forces a reload too.
 OLLAMA_KEEP_ALIVE = os.environ.get("OLLAMA_KEEP_ALIVE") or "30m"
+# Thinking models (gemma4, qwen3) otherwise reason first, unseen: on a laptop CPU
+# that was ~300 hidden tokens, over a minute, before the first word of the
+# answer, and it ate into num_predict. Off by default; OLLAMA_THINK=true restores it.
+OLLAMA_THINK = (os.environ.get("OLLAMA_THINK") or "false").strip().lower() in ("1", "true", "yes")
 
 
 class LLMError(RuntimeError):
@@ -127,7 +131,7 @@ def ollama_llm(model: str | None = None, host: str | None = None,
     def call(system: str, prompt: str) -> str:
         r = requests.post(f"{host}/api/generate", timeout=timeout_s, json={
             "model": model, "system": system, "prompt": prompt, "stream": False,
-            "keep_alive": OLLAMA_KEEP_ALIVE,
+            "keep_alive": OLLAMA_KEEP_ALIVE, "think": OLLAMA_THINK,
             "options": {"temperature": 0, "num_predict": DEFAULT_MAX_TOKENS,
                         "num_ctx": OLLAMA_NUM_CTX}})
         if r.status_code >= 400:          # Ollama explains itself in the body ("model not found")
@@ -341,6 +345,7 @@ def ollama_stream(model: str | None = None, host: str | None = None,
             with requests.post(f"{host}/api/generate", stream=True, timeout=(10, timeout_s),
                                json={"model": model, "system": system, "prompt": prompt,
                                      "stream": True, "keep_alive": OLLAMA_KEEP_ALIVE,
+                                     "think": OLLAMA_THINK,
                                      "options": {"temperature": 0, "num_predict": DEFAULT_MAX_TOKENS,
                                                  "num_ctx": OLLAMA_NUM_CTX}}) as r:
                 if r.status_code >= 400:
