@@ -5,6 +5,7 @@
     bdrag ask "ধারা ৩০২ কী বলে?"          -> bdrag_tools.ask
     bdrag eval / ablate / failures / calibrate / tune / e2e / gate / ...
     bdrag serve [--port 8000]            -> uvicorn service.app:get_app
+    bdrag start                          -> private laptop mode: local Ollama, 127.0.0.1, browser
     bdrag doctor                         -> checks index, models, LLM, OCR (rag/doctor.py)
 
 The tools are part of the installed package, so this works from any directory;
@@ -45,6 +46,7 @@ COMMANDS = {
     "gaps": "gaps",
     "probe": "probe",
     "review": "review",
+    "start": "start",
 }
 SCRIPTS = COMMANDS          # old name, kept for anything that imported it
 

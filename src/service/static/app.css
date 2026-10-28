@@ -139,6 +139,7 @@ details.settings[open] summary { color: var(--accent); border-color: var(--accen
 .trust { display: flex; gap: 10px 26px; flex-wrap: wrap; margin: 20px 0 0; padding: 0; list-style: none; color: var(--hero-muted); font-size: 14px; }
 .trust li { display: flex; align-items: center; gap: 8px; }
 .trust svg { color: #9be3c4; flex: none; }
+.trust a { color: inherit; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; }
 
 .banner { margin-top: 22px; }
 

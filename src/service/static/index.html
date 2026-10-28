@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="en">
+<html lang="bn">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Bangladesh Law Assistant · বাংলাদেশ আইন সহায়ক</title>
-<meta name="description" content="Ask questions about the laws of Bangladesh in Bangla or English and get answers grounded in the statutory text, with the section cited.">
+<meta name="description" content="Ask about the laws of Bangladesh in Bangla (or English) and get answers grounded in the statutory text, with the section cited. Free and open source; runs on your own computer with a local model.">
 <meta property="og:title" content="Bangladesh Law Assistant · বাংলাদেশ আইন সহায়ক">
 <meta property="og:description" content="Free answers about Bangladeshi law in Bangla or English, every claim cited to the section of the Act.">
 <meta name="theme-color" content="#0b4f3a">
@@ -16,7 +16,8 @@
   // Theme and language before first paint, so the page never flashes the wrong one.
   try {
     const t = localStorage.getItem("bdrag-theme"); if (t) document.documentElement.dataset.theme = t;
-    const l = localStorage.getItem("bdrag-lang") || ((navigator.language || "").startsWith("bn") ? "bn" : "en");
+    // Bangla first: English only for a visitor who picked it.
+    const l = localStorage.getItem("bdrag-lang") === "en" ? "en" : "bn";
     document.documentElement.lang = l;
   } catch (e) {}
 </script>
@@ -43,7 +44,7 @@
 
 <section class="hero">
   <div class="wrap narrow">
-    <p class="eyebrow" data-i18n="eyebrow">Free · Bangla & English · Cited to the section</p>
+    <p class="eyebrow" data-i18n="eyebrow">Bangla first, English too · Free · Cited to the section</p>
     <h1 data-i18n="h1">Ask about Bangladeshi law, in Bangla or English</h1>
     <p class="lead" data-i18n="lead">Ask what a section says, or describe your situation. Answers come from the text of the Acts, with every claim linked to the section it relies on.</p>
 
@@ -80,6 +81,7 @@
       <li><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5 3h10l4 4v14H5zm9 1.5V8h3.5"/></svg><span id="corpusline" data-i18n="trust1">From the official text of Bangladeshi Acts</span></li>
       <li><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg><span data-i18n="trust2">Every claim cited to a section</span></li>
       <li><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2 4 5v6c0 5 3.4 9.7 8 11 4.6-1.3 8-6 8-11V5z"/></svg><span data-i18n="trust3">Free, no sign-up</span></li>
+      <li id="privline" hidden><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 1a5 5 0 0 0-5 5v3H5v14h14V9h-2V6a5 5 0 0 0-5-5zm-3 5a3 3 0 0 1 6 0v3H9z"/></svg><a href="/about#private" id="privtext" data-i18n="trust4server">No outside AI company sees your question</a></li>
     </ul>
   </div>
 </section>
@@ -187,6 +189,7 @@
     <div class="row">
       <a href="http://bdlaws.minlaw.gov.bd/" target="_blank" rel="noopener" data-i18n="official">Laws of Bangladesh (official)</a>
       <a href="https://github.com/roy032/bd-legal-rag" target="_blank" rel="noopener" data-i18n="source">Source code</a>
+      <a href="/about" data-i18n="about">About</a>
       <a href="/privacy" data-i18n="privacy">Privacy and terms</a>
     </div>
   </div>
