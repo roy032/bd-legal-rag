@@ -225,6 +225,14 @@ body.answered section.examples { display: none; }
 .notice.bad .ni { color: var(--bad); }
 .notice.info { background: var(--accent-soft); border: 1px solid var(--accent-line); }
 .notice b { display: block; margin-bottom: 2px; }
+#verify { margin: 14px 22px 0; border-top: 1px solid var(--line); padding-top: 12px; font-size: 14px; }
+.verify .vhead { display: flex; gap: 8px 10px; flex-wrap: wrap; align-items: center; }
+.verify .vsum { color: var(--ink-2); }
+.verify .vlist { margin: 10px 0 0; padding-left: 1.2em; }
+.verify .vlist li { margin: 6px 0; line-height: 1.55; }
+.verify .vlist q { color: var(--ink); }
+.verify .vwhy { display: block; color: var(--warn); font-size: 13px; }
+.verify .vhow { margin: 8px 0 0; color: var(--muted); font-size: 13px; }
 .guidance { margin-top: 16px; border: 1px solid var(--warn-line); background: color-mix(in srgb, var(--warn-soft) 55%, var(--panel)); border-radius: 14px; padding: 16px 18px 6px; }
 .glabel { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
   color: var(--warn); margin-bottom: 8px; }
@@ -283,6 +291,8 @@ body.answered section.examples { display: none; }
 .src .body { padding: 0 14px 14px 52px; }
 .src .excerpt { white-space: pre-wrap; font-size: 14px; line-height: 1.8; background: var(--panel-2); border-radius: 10px; padding: 11px 13px;
   max-height: 320px; overflow: auto; color: var(--ink-2); border-left: 3px solid var(--accent-line); }
+.src .excerpt mark { background: color-mix(in srgb, var(--accent) 22%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
+.src .prov { margin: 8px 0 0; font-size: 12.5px; color: var(--muted); line-height: 1.5; }
 .src .links { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; font-size: 13px; font-weight: 600; }
 
 /* ---------------------------------------------------------------- legal aid */

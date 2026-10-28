@@ -9,6 +9,14 @@ from dataclasses import dataclass, field
 from ingest.textutils import bn_to_ascii_digits, detect_lang
 
 from .confidence import confidence
+from .evidence import (
+    claim_map,
+    evidence_spans,
+    latest_amendment_year,
+    provenance,
+    summarize,
+    verdict,
+)
 from .guardrails import GuardConfig, repair_instruction, run_checks, support_gate
 from .llm import LLM, LLMError
 from .prompts import (
@@ -96,8 +104,16 @@ class Answer:
         return [{**source_card(n, h), "chunk_id": h.chunk_id}
                 for n, h in enumerate(self.hits, 1) if n in self.cited]
 
-
-_YEAR = re.compile(r"(?<![0-9০-৯])([12০১২][0-9০-৯]{3})(?![0-9০-৯])")
+    def verification(self) -> dict:
+        """What a reader needs to check this answer (rag.evidence): one verdict,
+        each statement with the sections it cites, and the clause of each cited
+        section the answer leaned on."""
+        off_topic = bool((self.checks.get("scope") or {}).get("off_topic"))
+        rows = [] if (self.refused or self.general) else claim_map(
+            self.text, self.hits, self.checks.get("entailment"))
+        return {"verdict": verdict(self.refused, self.general, off_topic, rows),
+                "claims": rows, "summary": summarize(rows, self.text, self.checks.get("quotes")),
+                "evidence": evidence_spans(rows, self.hits)}
 
 
 def amendment_label(metadata: dict) -> str | None:
@@ -109,10 +125,8 @@ def amendment_label(metadata: dict) -> str | None:
     """
     if not metadata.get("amended"):
         return None
-    years = [int(bn_to_ascii_digits(y)) for note in metadata.get("footnotes") or []
-             for y in _YEAR.findall(note)]
-    years = [y for y in years if 1800 <= y <= 2100]
-    return f"amended (latest {max(years)})" if years else "amended"
+    year = latest_amendment_year(metadata)
+    return f"amended (latest {year})" if year else "amended"
 
 
 def source_card(n: int, h: Hit, max_chars: int = 1200) -> dict:
@@ -121,7 +135,7 @@ def source_card(n: int, h: Hit, max_chars: int = 1200) -> dict:
     return {"n": n, "citation": h.citation, "url": m.get("url"), "score": round(h.score, 4),
             "section_title": m.get("section_title"), "act_title": m.get("act_title"),
             "amended": amendment_label(m), "repealed": bool(m.get("repealed")),
-            "text": h.body[:max_chars]}
+            "text": h.body[:max_chars], **provenance(m)}
 
 
 # Characters of each excerpt the model sees. On a CPU, reading the prompt is most

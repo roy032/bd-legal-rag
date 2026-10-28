@@ -57,6 +57,18 @@ class Fetcher:
         h = hashlib.sha1(url.encode()).hexdigest()[:8]
         return self.cache_dir / f"{tail}.{h}.html"
 
+    def fetched_on(self, url: str) -> str | None:
+        """The day (UTC, YYYY-MM-DD) this page was last downloaded, from its cache
+        file; None when it is not cached. What an answer quotes is the site as it
+        stood that day, so the day travels with every chunk."""
+        if url.startswith("/"):
+            url = BASE_URL + url
+        path = self._cache_path(url)
+        for p in (path.with_name(path.name + ".gz"), path):
+            if p.exists():
+                return time.strftime("%Y-%m-%d", time.gmtime(p.stat().st_mtime))
+        return None
+
     def get(self, url: str, refresh: bool = False) -> str:
         if url.startswith("/"):
             url = BASE_URL + url

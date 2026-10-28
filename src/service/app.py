@@ -17,6 +17,8 @@ Endpoints
   POST /ask/stream      the same, streamed as server-sent events
   POST /feedback        thumbs up/down + comment, appended to a JSONL file
   GET  /a/{id}          permalink to a previously produced answer
+  GET  /acts            every act in the index: official page, sections, last amended, copied on
+  GET  /sources         the same as a page people can search
 
 Three things here that are easy to get wrong and expensive to get wrong:
 
@@ -63,8 +65,9 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from rag.agent import AgentConfig, LegalAgent
-from rag.answer import answer_question, answer_question_stream
+from rag.answer import answer_question, answer_question_stream, source_card
 from rag.chat import condense
+from rag.evidence import acts_table, provenance
 from rag.glossary import terms_in
 from rag.guardrails import GuardConfig
 from rag.legalaid import directory as legal_aid_directory
@@ -718,10 +721,14 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
             "answer": None,
             "degraded": True,
             "error": error,
-            "sources": [{"n": n, "citation": h.citation, "url": h.metadata.get("url"),
-                         "text": h.body[:800]} for n, h in enumerate(hits, 1)],
+            "sources": provisions(hits),
             "disclaimer": "Informational only — not legal advice.",
         }
+
+    def provisions(hits) -> list[dict]:
+        built = index_built_at(cfg.index)
+        return [{"n": n, "citation": h.citation, "url": h.metadata.get("url"), "text": h.body[:800],
+                 **provenance(h.metadata, built)} for n, h in enumerate(hits, 1)]
 
     async def degraded_retrieval(question: str, k: int,
                                  error: str = "the answering model is not configured; "
@@ -863,17 +870,45 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
              "amended": bool(h.metadata.get("amended")), "text": h.body[:1200]}
             for n, h in enumerate(hits, 1)]})
 
+    def dated(src: dict, built: float | None) -> dict:
+        """An excerpt from an index built before ingest recorded fetch days is
+        dated by the index build, and says so (as_of_kind)."""
+        if not src.get("as_of") and built:
+            src.update(as_of=time.strftime("%Y-%m-%d", time.gmtime(built)), as_of_kind="index")
+        return src
+
     def serialize(ans, cached: bool = False, answer_id: str | None = None,
                   plain: bool = False) -> dict:
         lang = lang_of(ans.question)
+        check = ans.verification()
+        built = index_built_at(cfg.index)
+        sources = []
+        for src in ans.sources:
+            src["evidence"] = check["evidence"].get(src["n"], [])
+            sources.append(dated(src, built))
+        # A refusal or general guidance shows what was searched, so the reader can
+        # see for themselves that the closest sections do not answer the question.
+        searched = ([dated({**source_card(n, h, max_chars=600), "evidence": []}, built)
+                     for n, h in enumerate(ans.hits[:3], 1)]
+                    if (ans.refused or ans.general) and ans.hits else [])
+        conf = ans.checks.get("confidence")
+        if conf and conf.get("label") == "high" and check["verdict"] == "partly_grounded":
+            # "High confidence" above "some statements need checking" teaches people
+            # to ignore one of the two; the statement-level check caps the label.
+            conf = {**conf, "label": "medium",
+                    "why": [*conf.get("why", []), "some statements need checking"]}
         return {
             "id": answer_id, "created": int(time.time()),
             "question": ans.question, "answer": ans.text,
             "refused": ans.refused, "abstained": ans.abstained, "repaired": ans.repaired,
             # Not grounded in the indexed laws: label it and replace any streamed draft.
             "general_guidance": ans.general,
-            "failures": ans.failures, "sources": ans.sources,
-            "confidence": ans.checks.get("confidence"),
+            # How to check it (rag.evidence): grounded / partly_grounded / not_found /
+            # general_guidance / off_topic, and each statement with its sections.
+            "verdict": check["verdict"], "claims": check["claims"],
+            "verification": check["summary"], "searched": searched,
+            "failures": ans.failures, "sources": sources,
+            "confidence": conf,
             "llm_calls": ans.llm_calls, "cached": cached,
             "latency_s": round(ans.latency_s, 3),
             "trace": ans.checks.get("trace"), "stop_reason": ans.checks.get("stop_reason"),
@@ -1000,8 +1035,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
             return JSONResponse({
                 "question": question, "answer": None, "degraded": True,
                 "error": f"the answering model is unavailable ({e})",
-                "sources": [{"n": n, "citation": h.citation, "url": h.metadata.get("url"),
-                             "text": h.body[:800]} for n, h in enumerate(hits, 1)],
+                "sources": provisions(hits),
                 "disclaimer": "Informational only — not legal advice.",
             }, status_code=503)
 
@@ -1190,13 +1224,32 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
     async def privacy_page(request: Request):
         return FileResponse(STATIC / "privacy.html")
 
+    async def sources_page(request: Request):
+        return FileResponse(STATIC / "sources.html")
+
+    async def acts(request: Request):
+        """Every act the answers can cite: its official page, how many sections,
+        the newest amendment our copy reflects, and when the copy was taken."""
+        try:
+            await run_in_threadpool(build)
+        except Exception as e:
+            return JSONResponse({"error": f"index not loaded: {e}"}, status_code=503)
+        if "acts" not in state or state.get("acts_for") != state.get("fingerprint"):
+            built = index_built_at(cfg.index)
+            state["acts"] = await run_in_threadpool(acts_table, state["records"] or [], built)
+            state["acts_for"] = state.get("fingerprint")
+        rows = state["acts"]
+        return JSONResponse({"index_built_at": index_age()["index_built_at"], "count": len(rows),
+                             "source": "http://bdlaws.minlaw.gov.bd", "acts": rows},
+                            headers={"cache-control": "public, max-age=3600"})
+
     async def about_page(request: Request):
         return FileResponse(STATIC / "about.html")
 
     async def robots(request: Request):
         # Shared answers hold what visitors asked; the API is not content.
         return PlainTextResponse("User-agent: *\nAllow: /$\nAllow: /about\nAllow: /privacy\nAllow: /static/\n"
-                                 "Disallow: /a/\nDisallow: /ask\nDisallow: /search\n"
+                                 "Allow: /sources\nDisallow: /a/\nDisallow: /ask\nDisallow: /search\n"
                                  "Disallow: /metrics\nDisallow: /stats\n")
 
     async def manifest(request: Request):
@@ -1216,6 +1269,8 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         Route("/privacy", privacy_page),
         Route("/about", about_page),
         Route("/terms", privacy_page),
+        Route("/sources", sources_page),
+        Route("/acts", acts),
         Route("/robots.txt", robots),
         Route("/manifest.webmanifest", manifest),
         Route("/health", health),
