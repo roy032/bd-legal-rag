@@ -20,6 +20,7 @@ import json
 import time
 from collections import defaultdict
 from pathlib import Path
+from typing import Any
 
 from ingest.sources import KIND_LABELS
 
@@ -56,7 +57,7 @@ def coverage_data(records: list[dict] | None, built_at: float | None,
     return {
         "index_built_at": time.strftime("%Y-%m-%d", time.gmtime(built_at)) if built_at else None,
         "corpus": corpus_counts(records),
-        "known_gaps": (load_json(known_path) or {}).get("gaps", []),
+        "known_gaps": known.get("gaps", []) if isinstance(known := load_json(known_path), dict) else [],
         "unanswered": public if isinstance(public, dict) else None,
     }
 
@@ -82,7 +83,7 @@ _STYLE = """
   .legal hr { border: 0; border-top: 1px solid var(--line); margin: 40px 0; }
 """
 
-TEXT = {
+TEXT: dict[str, dict[str, Any]] = {
     "en": {
         "title": "What we can and can't answer",
         "lead": "This service only answers from the documents below. When a question needs "
