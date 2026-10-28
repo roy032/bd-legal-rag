@@ -5,6 +5,30 @@ open is in [IMPROVEMENTS.md](IMPROVEMENTS.md).
 
 ## Unreleased
 
+### Verifiable answers
+- **Every statement is checked against the section it cites** (`rag/evidence.py`, no
+  model call). Each answer now carries a `verdict` (`grounded`, `partly_grounded`,
+  `not_found`, `general_guidance`, `off_topic`) and `claims`: each statement, the excerpts
+  it cites, and `linked` / `check` / `uncited`. A statement is flagged when its cited
+  section shares few of its words, or when it states a number (an amount, a term of
+  years) that is not in that section; an entailment model's verdict wins when one runs.
+  English answers from Bangla-only Acts are checked on their numbers only.
+- **The passage an answer relied on is highlighted** inside each cited section, and the
+  answer card shows "How to check this answer": the verdict, how many statements match,
+  and each statement to check, with the reason and its citation. A "high" confidence
+  label is capped at "medium" when any statement needs checking.
+- **Where each excerpt comes from and how current it is.** Source cards show the day the
+  page was copied from the official site, the newest amendment it reflects, and links to
+  the section and to the whole Act. Ingest records the day per chunk (`fetched`, from
+  the page cache); an index built before this shows the index build day and says so.
+  Re-run `bdrag ingest --offline` and rebuild the index to get per-page days.
+- **`/sources` page and `GET /acts`**: every Act in the index with its official page,
+  section count, last amendment year and the day our copy was taken, searchable by name
+  or year. Linked from the footer.
+- **Refusals show what was searched.** When the law text does not answer (refusal or
+  general guidance), the closest three sections are listed under "Closest sections found
+  (none answers this)", so a reader can see the gap for themselves.
+
 ### Lawyer review of the answers
 - **`bdrag review`**, the kit for the launch audit's top open item: nobody qualified had
   read the answers. `bdrag review sheet <run>.answers.json --n 50` takes a sample balanced

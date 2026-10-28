@@ -66,6 +66,17 @@ const T = {
     l_theme: "Switch colour theme", l_tabs: "Example questions by area of law", l_progress: "Progress",
     l_helpful: "Helpful", l_nothelpful: "Not helpful", l_aid: "Free legal aid", l_feedback: "Feedback",
     commentlabel: "What was wrong with this answer?", l_source: n => `Source ${n}`,
+    // Checking an answer (rag/evidence.py): verdict, statements, where each source comes from.
+    v_title: "How to check this answer", v_grounded: "Every statement cites a section that says it",
+    v_partly: "Some statements need checking", v_hidden: "statements to check",
+    v_summary: (a, n) => `${a} of ${n} statements match the section they cite.`,
+    v_quotes: (v, q) => ` ${v} of ${q} quotations are word-for-word.`,
+    v_how: "Tap a number to open its section; the passage the answer relies on is highlighted.",
+    v_uncited: "No section is cited for this.", v_check: "The cited section may not say this. Read it before relying on it.",
+    v_number: n => `This number is not in the cited section: ${n}.`,
+    nearest: "Closest sections found (none answers this)",
+    p_fetched: d => `Copied from the official site on ${d}`, p_index: d => `In this index since ${d}`,
+    p_amended: y => `last amended ${y}`, p_actpage: "Whole Act", acts: "Acts covered, with dates",
   },
   bn: {
     brand: "বাংলাদেশ আইন সহায়ক", brand2: "Bangladesh Law Assistant",
@@ -116,6 +127,16 @@ const T = {
     l_theme: "রঙের থিম বদলান", l_tabs: "আইনের বিষয় অনুযায়ী উদাহরণ প্রশ্ন", l_progress: "অগ্রগতি",
     l_helpful: "সহায়ক", l_nothelpful: "সহায়ক নয়", l_aid: "বিনামূল্যে আইনি সহায়তা", l_feedback: "মতামত",
     commentlabel: "এই উত্তরে কী ভুল ছিল?", l_source: n => `সূত্র ${toBn(n)}`,
+    v_title: "উত্তরটি কীভাবে যাচাই করবেন", v_grounded: "প্রতিটি কথা উল্লেখিত ধারায় আছে",
+    v_partly: "কিছু কথা যাচাই করে নিন", v_hidden: "যাচাই করার মতো কথা",
+    v_summary: (a, n) => `${toBn(n)}টি কথার মধ্যে ${toBn(a)}টি উল্লেখিত ধারার সঙ্গে মেলে।`,
+    v_quotes: (v, q) => ` ${toBn(q)}টি উদ্ধৃতির মধ্যে ${toBn(v)}টি হুবহু।`,
+    v_how: "কোনো নম্বরে চাপ দিলে সংশ্লিষ্ট ধারা খুলবে; উত্তর যে অংশের ওপর নির্ভর করেছে তা চিহ্নিত থাকবে।",
+    v_uncited: "এর জন্য কোনো ধারার উল্লেখ নেই।", v_check: "উল্লেখিত ধারায় এটি না-ও থাকতে পারে। নির্ভর করার আগে ধারাটি পড়ুন।",
+    v_number: n => `এই সংখ্যাটি উল্লেখিত ধারায় নেই: ${toBn(n)}।`,
+    nearest: "সবচেয়ে কাছের ধারা (এগুলোতে উত্তর নেই)",
+    p_fetched: d => `সরকারি সাইট থেকে নেওয়া ${d}`, p_index: d => `এই সূচিতে আছে ${d} থেকে`,
+    p_amended: y => `সর্বশেষ সংশোধন ${toBn(y)}`, p_actpage: "পুরো আইন", acts: "অন্তর্ভুক্ত আইন ও তারিখ",
   },
 };
 let LANG = document.documentElement.lang === "bn" ? "bn" : "en";
@@ -319,6 +340,27 @@ function setNotice(kind, title, body = "") {
 }
 
 let SOURCES = new Map();    // n -> source card, as streamed; final marks which are cited
+let NEAREST = false;         // a refusal shows the closest sections, none of them cited
+const fmtDay = d => {
+  const x = new Date(String(d) + "T00:00:00Z");
+  return isNaN(x) ? String(d) : x.toLocaleDateString(LANG === "bn" ? "bn-BD" : "en-GB",
+    {year: "numeric", month: "long", day: "numeric", timeZone: "UTC"});
+};
+// The clauses the answer relied on, marked inside the escaped excerpt.
+function excerptHtml(s) {
+  let html = esc(s.text);
+  for (const span of s.evidence || []) {
+    const e = esc(span), i = html.indexOf(e);
+    if (e && i >= 0) html = html.slice(0, i) + `<mark>${e}</mark>` + html.slice(i + e.length);
+  }
+  return html;
+}
+function provenanceHtml(s) {
+  const bits = [];
+  if (s.as_of) bits.push(esc(t(s.as_of_kind === "fetched" ? "p_fetched" : "p_index", fmtDay(s.as_of))));
+  if (s.last_amended) bits.push(esc(t("p_amended", s.last_amended)));
+  return bits.length ? `<p class="prov">${bits.join(" · ")}</p>` : "";
+}
 function renderSources(cited = null) {
   const list = [...SOURCES.values()].sort((a, b) =>
     (cited ? (cited.has(b.n) - cited.has(a.n)) : 0) || a.n - b.n);
@@ -326,9 +368,10 @@ function renderSources(cited = null) {
   if (!list.length) { $("srcwrap").hidden = true; return; }
   $("srcwrap").hidden = false;
   $("srccount").textContent = LANG === "bn" ? toBn(list.length) : list.length;
+  document.querySelector("#srch [data-i18n]").textContent = t(NEAREST ? "nearest" : "sources");
   const num = n => LANG === "bn" ? toBn(n) : n;
   $("sources").innerHTML = list.map(s => {
-    const uncited = cited && !cited.has(s.n);
+    const uncited = NEAREST || (cited && !cited.has(s.n));
     const badges = [
       s.amended ? `<span class="badge warn" title="This section has been changed by a later act; the text shown is the amended one.">${esc(LANG === "bn" ? s.amended.replace("amended", t("amended")).replace("latest", "সর্বশেষ") : s.amended)}</span>` : "",
       s.repealed ? `<span class="badge bad">${esc(t("repealed"))}</span>` : "",
@@ -343,10 +386,11 @@ function renderSources(cited = null) {
       <summary><span class="num">${esc(num(s.n))}</span>
         <span class="meta">${act && sec !== cite ? `<span class="act">${esc(act)}</span>` : ""}
         <span class="cit">${esc(sec || cite)}${s.section_title ? " — " + esc(s.section_title) : ""}</span>
-        <span class="tags">${uncited ? `<span class="badge">${esc(t("notcited"))}</span>` : ""}${badges}</span></span>
+        <span class="tags">${uncited && !NEAREST ? `<span class="badge">${esc(t("notcited"))}</span>` : ""}${badges}</span></span>
         <svg class="chev" width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="m9 6 6 6-6 6-1.4-1.4L12.2 12 7.6 7.4z"/></svg></summary>
-      <div class="body">${s.text ? `<div class="excerpt">${esc(s.text)}</div>` : ""}
-        ${safeUrl(s.url) ? `<div class="links"><a href="${safeUrl(s.url)}" target="_blank" rel="noopener">${esc(t("official_text"))} ↗</a></div>` : ""}
+      <div class="body">${s.text ? `<div class="excerpt">${excerptHtml(s)}</div>` : ""}
+        ${provenanceHtml(s)}
+        ${safeUrl(s.url) || safeUrl(s.act_url) ? `<div class="links">${safeUrl(s.url) ? `<a href="${safeUrl(s.url)}" target="_blank" rel="noopener">${esc(t("official_text"))} ↗</a>` : ""}${safeUrl(s.act_url) ? `<a href="${safeUrl(s.act_url)}" target="_blank" rel="noopener">${esc(t("p_actpage"))} ↗</a>` : ""}</div>` : ""}
       </div></details></li>`;
   }).join("");
 }
@@ -373,6 +417,26 @@ function badge(text, cls = "", title = "") {
   const b = document.createElement("span");
   b.className = "badge " + cls; b.textContent = text; if (title) b.title = title;
   $("badges").appendChild(b);
+}
+
+// Under a cited answer: one verdict, how many statements match their sections, and
+// each statement a reader should check, with the reason and its citations.
+function renderVerify(d) {
+  const el = $("verify"), rows = d.claims || [];
+  const show = !d.degraded && (d.verdict === "grounded" || d.verdict === "partly_grounded") && rows.length;
+  el.hidden = !show;
+  if (!show) { el.innerHTML = ""; return; }
+  const v = d.verification || {}, ok = d.verdict === "grounded";
+  const num = n => LANG === "bn" ? toBn(n) : n;
+  const why = r => r.status === "uncited" ? t("v_uncited")
+    : /^a number is not/.test(r.why || "") ? t("v_number", r.why.split(": ")[1] || "") : t("v_check");
+  const todo = rows.filter(r => r.status !== "linked");
+  el.innerHTML = `<div class="vhead"><span class="badge dot ${ok ? "ok" : "warn"}">${esc(t(ok ? "v_grounded" : "v_partly"))}</span>
+    <span class="vsum">${esc(t("v_summary", v.linked ?? rows.length - todo.length, v.statements ?? rows.length))}${v.quotes ? esc(t("v_quotes", v.quotes_verbatim, v.quotes)) : ""}</span></div>
+    ${todo.length ? `<ul class="vlist" aria-label="${esc(t("v_hidden"))}">${todo.map(r => `<li><q>${esc(r.text)}</q>${(r.cites || []).map(n =>
+        ` <button type="button" class="cite" data-n="${esc(n)}" aria-label="${esc(t("l_source", n))}">${esc(num(n))}</button>`).join("")}
+      <span class="vwhy">${esc(why(r))}</span></li>`).join("")}</ul>` : ""}
+    <p class="vhow">${esc(t("v_how"))}</p>`;
 }
 
 let LAST = null, currentId = null;
@@ -410,9 +474,19 @@ function render(d, opts = {}) {
   if (!d.degraded) {
     const cited = new Set((d.sources || []).map(s => s.n));
     (d.sources || []).forEach(s => SOURCES.set(s.n, {...(SOURCES.get(s.n) || {}), ...s}));
-    if ((d.refused || d.general_guidance) && !(d.sources || []).length) SOURCES = new Map();
+    NEAREST = false;
+    if ((d.refused || d.general_guidance) && !(d.sources || []).length) {
+      // Show what was searched, so the reader can see the law text really does not cover it.
+      SOURCES = new Map((d.searched || []).map(s => [s.n, s]));
+      NEAREST = SOURCES.size > 0;
+    }
     renderSources(cited.size ? cited : null);
   }
+  renderVerify(d);
+  document.querySelectorAll("#answer .cite").forEach(b => {
+    const s = SOURCES.get(+b.dataset.n);
+    if (s && s.citation) { b.title = s.citation; b.setAttribute("aria-label", `${t("l_source", b.dataset.n)}: ${s.citation}`); }
+  });
   steps(null);                 // finished: the badges below say what happened
 
   $("badges").innerHTML = "";
@@ -492,7 +566,8 @@ function startView(question, parentQ = "") {
   $("actions").hidden = true; $("fbform").hidden = true; $("fbmsg").textContent = "";
   $("fbup").setAttribute("aria-pressed", "false"); $("fbdown").setAttribute("aria-pressed", "false");
   setNotice("", "");
-  SOURCES = new Map(); renderSources();
+  SOURCES = new Map(); NEAREST = false; renderSources();
+  $("verify").hidden = true; $("verify").innerHTML = "";
   $("skeleton").hidden = false;
   steps("s_search");
   LAST = null; currentId = null;
