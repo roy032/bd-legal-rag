@@ -93,6 +93,29 @@ def check_index(index_dir: str | Path) -> Check:
                               f"{info.get('embedder') or '?'} (dim {info.get('dim', '?')})")
 
 
+# Parliament amends acts every session; past this an index likely quotes repealed text.
+INDEX_MAX_AGE_DAYS = 45
+
+
+def check_index_age(index_dir: str | Path, max_days: float | None = None,
+                    now: float | None = None) -> Check | None:
+    import time
+
+    from .pipeline import index_built_at
+
+    built = index_built_at(index_dir)
+    if built is None:
+        return None
+    if max_days is None:
+        max_days = float(os.environ.get("BDRAG_INDEX_MAX_AGE_DAYS") or INDEX_MAX_AGE_DAYS)
+    days = ((now if now is not None else time.time()) - built) / 86400
+    stamp = time.strftime("%Y-%m-%d", time.gmtime(built))
+    return Check("index age", WARN if days > max_days else OK,
+                 f"built {stamp}, {days:.0f} days ago"
+                 + (f" (older than {max_days:.0f})" if days > max_days else ""),
+                 "re-ingest the acts amended since then: bdrag ingest, then bdrag index --bm25")
+
+
 def _hf_cache_dirs() -> list[Path]:
     dirs = []
     if os.environ.get("HF_HUB_CACHE"):
@@ -196,6 +219,8 @@ def run(index_dir: str | None = None, model: str | None = None) -> list[Check]:
     model = model or _index_embedder(index_dir) or os.environ.get("BDRAG_MODEL", "BAAI/bge-m3")
     hashing = model.startswith("hashing")
     checks = [check_python(), *check_packages(need_embedder=not hashing), check_index(index_dir)]
+    if (age := check_index_age(index_dir)) is not None:
+        checks.append(age)
     if not hashing:
         checks.append(check_model_cache(model))
     return [*checks, *check_llm(), check_ocr()]

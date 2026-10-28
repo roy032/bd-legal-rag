@@ -259,6 +259,25 @@ def index_fingerprint(index_dir: str | Path) -> str:
     return hashlib.sha256(json.dumps(info, sort_keys=True).encode()).hexdigest()[:16]
 
 
+def index_built_at(index_dir: str | Path) -> float | None:
+    """When the index was built, as a Unix time: `built_at` from index.json, or the
+    file's modification time for an index built before that field existed. None
+    without an index. Laws are amended; an old index answers with repealed text."""
+    import calendar
+    import json
+    import time
+
+    path = Path(index_dir) / "index.json"
+    if not path.exists():
+        return None
+    try:
+        stamp = json.loads(path.read_text(encoding="utf-8")).get("built_at")
+        built = float(calendar.timegm(time.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ"))) if stamp else None
+    except (OSError, ValueError, TypeError):
+        built = None                 # unreadable stamp: fall back to the file's date
+    return built if built is not None else path.stat().st_mtime
+
+
 # --------------------------------------------------------------------- wiring
 
 def add_retrieval_args(ap) -> None:

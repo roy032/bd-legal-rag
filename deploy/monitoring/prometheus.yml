@@ -1,0 +1,14 @@
+# Minimal Prometheus for one bd-legal-rag container:
+#   docker compose --profile monitoring up
+# then http://localhost:9090/alerts. If the api sets BDRAG_METRICS_TOKEN, add
+#   authorization: { credentials: <the token> }
+# under the job below.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 30s
+rule_files: [alerts.yml]
+scrape_configs:
+  - job_name: bdrag
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["api:8000"]

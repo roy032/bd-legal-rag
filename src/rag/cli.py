@@ -41,6 +41,9 @@ COMMANDS = {
     "topics": "topics",
     "redteam": "redteam",
     "semcache": "semcache",
+    "backup": "backup",
+    "gaps": "gaps",
+    "probe": "probe",
 }
 SCRIPTS = COMMANDS          # old name, kept for anything that imported it
 
@@ -71,7 +74,8 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(f"bdrag: unknown command '{cmd}'\n{usage()}")
     module = importlib.import_module(f"bdrag_tools.{COMMANDS[cmd]}")
     sys.argv = [f"bdrag {cmd}", *rest]
-    module.main()
+    # A tool that returns a status (backup --verify, semcache) must fail the shell too.
+    raise SystemExit(module.main())
 
 
 if __name__ == "__main__":

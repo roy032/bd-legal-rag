@@ -47,6 +47,14 @@ services:
     profiles: ["redis"]
     command: ["redis-server", "--save", "", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
 
+  # Optional: Prometheus with the SLO alert rules (`docker compose --profile monitoring up`,
+  # then http://localhost:9090/alerts). See docs/OPERATIONS.md#slos-and-alerts.
+  prometheus:
+    image: prom/prometheus:v2.53.2
+    profiles: ["monitoring"]
+    ports: ["9090:9090"]
+    volumes: ["./deploy/monitoring:/etc/prometheus:ro"]
+
 volumes:
   hf-cache:
   qdrant:

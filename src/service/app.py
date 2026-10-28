@@ -68,7 +68,7 @@ from rag.chat import condense
 from rag.guardrails import GuardConfig
 from rag.llm import LLMError
 from rag.pii import redact
-from rag.pipeline import RetrievalConfig, index_fingerprint
+from rag.pipeline import RetrievalConfig, index_built_at, index_fingerprint
 from rag.topics import match_topics
 from service.answers import AnswerStore
 from service.backends import make_cache, make_limiter
@@ -78,6 +78,7 @@ from service.logs import request_id as request_id_var
 from service.logs import safe_request_id
 from service.metrics import Metrics
 from service.resilience import Admission, Busy, CircuitBreaker, SingleFlight
+from service.retention import Housekeeper, append_jsonl, prune_jsonl
 from service.semcache import Probe, SemanticCache, evidence, resolve_threshold, signature
 from service.tracing import Trace
 
@@ -172,6 +173,10 @@ class ServiceConfig:
     # empty = memory only. Kept this many days, then deleted; 0 = forever.
     answers_path: str = ""
     answer_days: float = 90
+    # The query and feedback logs hold questions too: rows older than this many days
+    # are deleted, checked every `housekeeping_s`. 0 = keep forever.
+    log_days: float = 90
+    housekeeping_s: float = 6 * 3600
     cors_origins: list[str] = field(default_factory=lambda: ["*"])
     trust_proxy: bool = False
     verify_live: bool = False        # re-check cited sections against bdlaws (rag/verify.py)
@@ -251,6 +256,8 @@ class ServiceConfig:
             analytics_path=_env_str("BDRAG_ANALYTICS", "data/queries.jsonl"),
             answers_path=_env_str("BDRAG_ANSWERS_DB", "data/answers.sqlite3"),
             answer_days=_env_float("BDRAG_ANSWER_DAYS", 90.0) or 0.0,
+            log_days=_env_float("BDRAG_LOG_DAYS", 90.0) or 0.0,
+            housekeeping_s=_env_float("BDRAG_HOUSEKEEPING_S", 6 * 3600.0) or 6 * 3600.0,
             cors_origins=[o.strip() for o in _env_str("BDRAG_CORS", "*").split(",") if o.strip()],
             trust_proxy=_env_bool("BDRAG_TRUST_PROXY", False),
             verify_live=_env_bool("BDRAG_VERIFY_LIVE", False),
@@ -368,15 +375,7 @@ def _client(request: Request, trust_proxy: bool = False) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def _append_jsonl(path: str, row: dict) -> None:
-    if not path:
-        return
-    try:
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
-    except Exception:                        # logging must never break a response
-        log.warning("could not append to %s", path)
+_append_jsonl = append_jsonl     # shares the prune lock (service/retention.py)
 
 
 MULTI_HOP_HINTS = ("difference", "compare", "পার্থক্য", "তুলনা", "and also", "এবং কি",
@@ -440,6 +439,21 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
     admission = Admission(cfg.max_inflight, cfg.max_queue)
     breaker = CircuitBreaker(cfg.breaker_failures, cfg.breaker_cooldown_s)
     flights = SingleFlight()
+    chores: dict = {}
+    if cfg.answers_path and cfg.answer_days:
+        chores["answers"] = recent.purge
+    for name, path in (("queries", cfg.analytics_path), ("feedback", cfg.feedback_path)):
+        if path and cfg.log_days:
+            chores[name] = lambda path=path: prune_jsonl(path, cfg.log_days)
+    housekeeper = Housekeeper(chores, cfg.housekeeping_s, on_result=lambda name, n: metrics.inc(
+        "retention_deleted_total", n, store=name) if n else None)
+
+    def index_age() -> dict:
+        built = index_built_at(cfg.index)
+        if built is None:
+            return {"index_built_at": None, "index_age_days": None}
+        return {"index_built_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(built)),
+                "index_age_days": round((time.time() - built) / 86400, 1)}
 
     build_lock = threading.Lock()
 
@@ -552,7 +566,8 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         _append_jsonl(cfg.analytics_path, {
             "ts": time.time(), "id": answer_id, "client": client,
             "question": ans.question,
-            "agent": use_agent, "refused": ans.refused, "failures": ans.failures,
+            "agent": use_agent, "refused": ans.refused, "general": ans.general,
+            "failures": ans.failures,
             "sources": [s["chunk_id"] for s in ans.sources], "latency_s": round(ans.latency_s, 2)})
 
     def thread_history(parent_id: str, turns: int = 3) -> list[tuple[str, str]]:
@@ -747,7 +762,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         return JSONResponse({"status": "ok", "mode": state["pipeline"].config.mode,
                              "chunks": len(store) if store else None,
                              "embedder": getattr(store, "embedder_name", None),
-                             "index_fingerprint": state["fingerprint"],
+                             "index_fingerprint": state["fingerprint"], **index_age(),
                              "agent_enabled": cfg.agent_enabled,
                              "llm": cfg.provider or "none",
                              "llm_model": cfg.llm_model or None,
@@ -762,6 +777,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         cannot pile up behind a minute-long model load."""
         if state["ready"]:
             return JSONResponse({"status": "ready", "index_fingerprint": state["fingerprint"],
+                                 "index_built_at": index_age()["index_built_at"],
                                  "circuit": breaker.state})
         body = {"status": "loading"}
         if state["load_error"]:
@@ -778,7 +794,9 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
             "config": {**{k: v for k, v in asdict(cfg).items()
                           if k not in ("cors_origins", "api_keys", "retrieval")},
                        "retrieval": cfg.retrieval.to_dict()},
-            "index_fingerprint": state["fingerprint"],
+            "index_fingerprint": state["fingerprint"], **index_age(),
+            "retention": {"answer_days": cfg.answer_days, "log_days": cfg.log_days,
+                          **housekeeper.stats()},
             "cache": answers.stats(),
             "semantic_cache": sem.stats() if (sem := semantic()) else None,
             "admission": admission.stats(),
@@ -803,6 +821,8 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
         metrics.set_gauge("queued_answers", live["waiting"])
         metrics.set_gauge("circuit_open", 0 if breaker.state == CircuitBreaker.CLOSED else 1)
         metrics.set_gauge("ready", 1 if state["ready"] else 0)
+        if (built := index_built_at(cfg.index)) is not None:
+            metrics.set_gauge("index_age_seconds", round(time.time() - built))
         return PlainTextResponse(metrics.prometheus(), media_type="text/plain; version=0.0.4")
 
     async def search(request: Request):
@@ -1196,13 +1216,18 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
     async def lifespan(_app):
         if cfg.preload and not state["ready"]:
             threading.Thread(target=preload, daemon=True).start()
-        yield
+        housekeeper.start()
+        try:
+            yield
+        finally:
+            housekeeper.stop()
 
     app = Starlette(routes=routes, middleware=middleware, lifespan=lifespan)
     app.state.config, app.state.metrics, app.state.cache = cfg, metrics, answers
     app.state.components, app.state.recent = state, recent
     app.state.build = build
     app.state.admission, app.state.breaker, app.state.flights = admission, breaker, flights
+    app.state.housekeeper = housekeeper
     return app
 
 

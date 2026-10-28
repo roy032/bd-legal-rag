@@ -90,9 +90,33 @@ sum(rate(shed_total[5m]) + rate(circuit_open_total[5m]) + rate(degraded_total[5m
   / sum(rate(answers_total[5m]))
 ```
 
-Suggested alerts: `circuit_open == 1` for 5 minutes (the model is down);
-shed share above 10% for 15 minutes (add capacity or lower traffic); p95 time to first
-token above 15 s (the model is no longer warm: check `OLLAMA_KEEP_ALIVE`).
+Also `index_age_seconds` (gauge, since the index was built), `retention_deleted_total{store}`
+(rows the retention policy deleted), `feedback_total{rating}` and `daily_limit_total`.
+
+## SLOs and alerts
+
+The rules are code, in [`deploy/monitoring/alerts.yml`](../deploy/monitoring/alerts.yml),
+checked and unit-tested with `promtool` in CI
+([`alerts.test.yml`](../deploy/monitoring/alerts.test.yml)).
+`docker compose --profile monitoring up` starts Prometheus with them on :9090.
+
+| SLO | Target | Alert |
+|---|---|---|
+| Availability: requests that are not 5xx (`/readyz` while loading excluded) | 99.5% over 30 days | `BdragErrorBudgetFastBurn` pages at 14.4× burn (1 h and 5 min windows); `BdragErrorBudgetSlowBurn` tickets at 6× (6 h and 30 min) |
+| `/search` latency | p95 under 1 s | `BdragSearchSlow` after 15 min |
+| Answer latency | p95 under 120 s (laptop CPU; lower it on a GPU or a hosted model) | `BdragAnswersSlow` after 30 min |
+
+Other alerts: `BdragDown` (scrape fails 5 min), `BdragNotReady` (15 min),
+`BdragModelCircuitOpen` (5 min: the model is down, visitors get sections only),
+`BdragShedding` (over 10% of answers retrieval-only for 15 min), `BdragDailyCapReached`,
+`BdragIndexStale` (index older than 45 days). Each carries a one-line runbook.
+
+Without a Prometheus server, the uptime workflow is the free fallback:
+set the repository variable `BDRAG_URL` and
+[`.github/workflows/uptime.yml`](../.github/workflows/uptime.yml) runs `bdrag probe`
+every 30 minutes (alive, ready, a canary search, the home page, index age under 60 days).
+While it fails one issue labelled `uptime` stays open; it closes on the next pass. Run
+the same check by hand with `bdrag probe --url <base url>`.
 
 ## Logs
 
@@ -144,6 +168,35 @@ quote the law as it stood that day, and the page says which day. Shared pages ca
 opened the service logs it once and keeps links in memory; `/stats` reports
 `shared_answers.durable`. On a Hugging Face Space the disk is wiped on restart unless the
 Space has persistent storage; point the variable at `/data/answers.sqlite3` there.
+
+### Retention
+
+The query log and the feedback log also hold visitors' questions. Rows older than
+`BDRAG_LOG_DAYS` (90, like shared answers; `0` keeps them) are deleted at startup and every
+`BDRAG_HOUSEKEEPING_S` seconds (6 h) by `src/service/retention.py`, which also runs the
+shared-answer purge. The privacy page states this period: change both together.
+
+### Backups
+
+```bash
+bdrag backup                       # data/ -> data/backups/bdrag-<UTC time>.tar.gz, keeps 14
+bdrag backup --verify data/backups/bdrag-20261027T020000Z.tar.gz
+bdrag backup --restore data/backups/bdrag-20261027T020000Z.tar.gz --to data --force
+```
+
+The database is copied with SQLite's online backup, so it is safe while the service
+runs; each archive carries a SHA-256 and row count per file. Run it nightly (cron, or
+Windows Task Scheduler with `bdrag backup --out D:\bdrag-backups`) and copy the archive
+to another machine or cloud drive. Restore with the service stopped. The index is not
+backed up: rebuild it, or keep a copy of `data/index` from the build.
+
+### What people could not get answered
+
+`bdrag gaps --since 2026-10-01 --out results/gaps.md` lists the questions that were
+refused, got general guidance only, failed a guardrail or got a thumbs-down, ranked by
+distinct visitors, with the topic-table entry each matched. Questions matching no topic
+are the first candidates for `rag/topics.py`; `bdrag feedback-to-eval` turns them into
+eval drafts. The report holds what people asked; keep it private.
 
 ## Container hardening
 
