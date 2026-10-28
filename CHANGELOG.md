@@ -5,6 +5,23 @@ open is in [IMPROVEMENTS.md](IMPROVEMENTS.md).
 
 ## Unreleased
 
+### What to do next, plain language, legal-aid contacts
+- **A "What to do next" checklist** under every answer about a situation: the cited
+  steps the model wrote under "What you can do", as tick boxes kept in the browser,
+  its practical tips (or three fixed ones), and who to call. Read out of the checked
+  answer by `rag/nextsteps.py`, so it costs no extra model call; the API returns it as
+  `next_steps` and permalinks keep it. Lookups and refusals get none.
+- **Plain language / সহজ ভাষা** switch beside the Ask button: `plain: true` selects
+  `answer-system/v6-plain`, the v6 prompt plus one rule for short sentences and
+  everyday words, with the same citation checks. A hand-written glossary of 24 legal
+  terms in both languages explains the words the answer uses. Cached apart from
+  normal answers.
+- **Legal-aid contacts**: 16430 with every checklist, plus the hotline that fits the
+  situation (999, 109, 1098, 333, 16121, 16357), chosen from the topic table in code,
+  never by the model. `GET /legal-aid` and a district picker for all 64 district legal
+  aid offices. The numbers still need a person to check them before launch:
+  [docs/LEGAL_AID.md](docs/LEGAL_AID.md).
+
 ### Lawyer review of the answers
 - **`bdrag review`**, the kit for the launch audit's top open item: nobody qualified had
   read the answers. `bdrag review sheet <run>.answers.json --n 50` takes a sample balanced
