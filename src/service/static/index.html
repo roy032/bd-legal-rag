@@ -64,6 +64,8 @@
             <span id="hosted" class="hosted" hidden data-i18n="hosted">Your question is sent to an outside provider.</span>
           </div>
         </details>
+        <button type="button" class="chip plaintoggle" id="plain" aria-pressed="false" title="Short sentences and everyday words; legal terms explained">
+          <svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 5h16v2H4zm0 6h10v2H4zm0 6h13v2H4z"/></svg><span data-i18n="plain">Plain language</span></button>
         <span class="count" id="count" aria-live="polite"></span>
         <span class="kbd" aria-hidden="true" data-i18n="enterhint">Enter to ask · Shift+Enter for a new line</span>
         <button type="button" class="ghost" id="stop" hidden data-i18n="stop">Stop</button>
@@ -109,6 +111,18 @@
           <span class="glabel" data-i18n="glabel">General guidance — not from the indexed law text</span>
           <div class="prose" id="gtext"></div>
         </div>
+        <section id="nextsteps" class="nextsteps" hidden aria-labelledby="nsh">
+          <div class="nshead">
+            <h3 id="nsh"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm-9 14-5-5 1.4-1.4 3.6 3.6 7.6-7.6L19 8z"/></svg><span data-i18n="ns_title">What to do next</span></h3>
+            <button type="button" class="linkbtn" id="nscopy" data-i18n="ns_copy">Copy checklist</button>
+          </div>
+          <ol class="checks" id="nslist"></ol>
+          <div id="nstipswrap"><h4 data-i18n="ns_tips">Practical tips</h4><ul class="tips" id="nstips"></ul></div>
+          <h4 data-i18n="ns_help">Free help</h4>
+          <ul class="helplist" id="nshelp"></ul>
+          <p class="nsnote" data-i18n="ns_note">Steps with a number in brackets come from the cited section. Tips and phone numbers are general and are not taken from the law.</p>
+        </section>
+        <details id="glosswrap" class="gloss" hidden><summary data-i18n="gloss">Words in this answer, explained</summary><dl id="gloss"></dl></details>
         <details id="tracewrap" hidden class="trace"><summary data-i18n="trace">What the deeper search did</summary><ol id="trace"></ol></details>
         <footer class="actions" id="actions" hidden>
           <div class="fbgroup" role="group" aria-label="Feedback" data-i18n-label="l_feedback">
@@ -142,6 +156,11 @@
     <div class="aidtext">
       <b data-i18n="aid1">Need help with your own case?</b>
       <p data-i18n="aid2">Call the government's free legal aid hotline (National Legal Aid Services Organisation), toll-free, or visit the legal aid office at your district judge's court.</p>
+      <div class="district" id="districtwrap" hidden>
+        <label for="district" data-i18n="district">Your district's legal aid office</label>
+        <select id="district"></select>
+        <p class="office" id="office" aria-live="polite"></p>
+      </div>
     </div>
     <a class="phone" href="tel:16430"><span data-i18n="call">Call</span> 16430</a>
   </aside>
