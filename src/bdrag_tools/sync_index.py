@@ -45,7 +45,7 @@ def main() -> None:
                           allow_patterns=INDEX_FILES, commit_message="Update index")
         print(f"pushed {index} to https://huggingface.co/datasets/{args.repo}")
     else:
-        path = hub.snapshot_download(repo_id=args.repo, repo_type="dataset", local_dir=str(index),
+        path = hub.snapshot_download(repo_id=args.repo, repo_type="dataset", local_dir=args.index,
                                      allow_patterns=INDEX_FILES, revision=args.revision)
         print(f"index ready in {path}")
 

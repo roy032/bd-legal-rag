@@ -5,6 +5,14 @@ open is in [IMPROVEMENTS.md](IMPROVEMENTS.md).
 
 ## Unreleased
 
+### Windows lifecycle and portability
+- SQLite answer stores now open short-lived connections per operation, preventing
+  Windows file-lock leaks when services and test clients are recreated.
+- Request metrics normalize permalink routes to `/a/{answer_id}` even when the
+  metrics middleware runs before Starlette attaches a matched route.
+- Hugging Face index sync preserves the caller's `--index` string on Windows and
+  POSIX, and `pytest` is included in the development extra.
+
 ### Law beyond the Acts, and an honest list of what is missing
 - **`bdrag sources`**: rules, regulations, SROs, orders and Supreme Court judgments,
   listed one per line in [data/sources/manifest.jsonl](data/sources/manifest.jsonl) and

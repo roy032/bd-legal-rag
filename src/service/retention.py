@@ -32,7 +32,9 @@ def append_jsonl(path: str, row: dict) -> None:
         return
     try:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-        line = json.dumps(row, ensure_ascii=False) + "\n"
+        # Keep operational logs ASCII-only so they remain readable on Windows
+        # hosts whose default text encoding is not UTF-8.
+        line = json.dumps(row, ensure_ascii=True) + "\n"
         with LOG_LOCK, open(path, "a", encoding="utf-8") as f:
             f.write(line)
     except Exception:                        # logging must never break a response

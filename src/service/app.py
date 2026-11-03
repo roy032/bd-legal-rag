@@ -329,7 +329,22 @@ def route_label(request: Request) -> str:
     labelled by raw path grow a new series for every permalink and every scanner
     probing /wp-login.php, until the scrape is too big to store."""
     route = request.scope.get("route")
-    return getattr(route, "path", None) or "unmatched"
+    if route_path := getattr(route, "path", None):
+        return route_path
+    # BaseHTTPMiddleware runs before Starlette attaches the matched route to the
+    # scope. Keep high-cardinality permalink IDs out of metrics without relying
+    # on middleware ordering.
+    path = request.url.path
+    if re.fullmatch(r"/a/[^/]+", path):
+        return "/a/{answer_id}"
+    if path in {"/", "/privacy", "/about", "/terms", "/coverage", "/accuracy",
+                "/sources", "/acts", "/robots.txt", "/manifest.webmanifest",
+                "/health", "/livez", "/readyz", "/stats", "/models", "/metrics",
+                "/legal-aid"}:
+        return path
+    if path.startswith("/static/"):
+        return "/static"
+    return "unmatched"
 
 
 class RequestContext(BaseHTTPMiddleware):
@@ -1346,6 +1361,7 @@ def create_app(config: ServiceConfig | None = None, pipeline=None, llm=None,
             yield
         finally:
             housekeeper.stop()
+            recent.close()
 
     app = Starlette(routes=routes, middleware=middleware, lifespan=lifespan)
     app.state.config, app.state.metrics, app.state.cache = cfg, metrics, answers

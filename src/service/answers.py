@@ -20,6 +20,7 @@ import sqlite3
 import threading
 import time
 from collections import OrderedDict
+from contextlib import contextmanager
 from pathlib import Path
 
 log = logging.getLogger("service")
@@ -31,26 +32,35 @@ class AnswerStore:
         self.max_age_s = max_age_days * 86400 if max_age_days and max_age_days > 0 else None
         self._lock = threading.Lock()
         self._memory: OrderedDict[str, tuple[float, dict]] = OrderedDict()
-        self._db: sqlite3.Connection | None = None
+        self._durable = False
         self._puts = 0
         if path:
             try:
                 Path(path).parent.mkdir(parents=True, exist_ok=True)
-                self._db = sqlite3.connect(path, check_same_thread=False, timeout=5)
-                self._db.execute("PRAGMA journal_mode=WAL")
-                self._db.execute("CREATE TABLE IF NOT EXISTS answers ("
-                                 "id TEXT PRIMARY KEY, created REAL NOT NULL, payload TEXT NOT NULL)")
-                self._db.execute("CREATE INDEX IF NOT EXISTS answers_created ON answers(created)")
-                self._db.commit()
+                with self._connect() as db:
+                    db.execute("PRAGMA journal_mode=WAL")
+                    db.execute("CREATE TABLE IF NOT EXISTS answers ("
+                               "id TEXT PRIMARY KEY, created REAL NOT NULL, payload TEXT NOT NULL)")
+                    db.execute("CREATE INDEX IF NOT EXISTS answers_created ON answers(created)")
+                    db.commit()
+                self._durable = True
                 self.purge()
             except (OSError, sqlite3.Error):
                 # A read-only disk must not stop the service; links then last until restart.
                 log.exception("answer store %s unavailable; keeping shared answers in memory", path)
-                self._db = None
+                self._durable = False
+
+    @contextmanager
+    def _connect(self):
+        db = sqlite3.connect(self.path, check_same_thread=False, timeout=5)
+        try:
+            yield db
+        finally:
+            db.close()
 
     @property
     def durable(self) -> bool:
-        return self._db is not None
+        return self._durable
 
     def _expired(self, created: float) -> bool:
         return self.max_age_s is not None and time.time() - created > self.max_age_s
@@ -58,15 +68,16 @@ class AnswerStore:
     def put(self, answer_id: str, payload: dict) -> None:
         created = float(payload.get("created") or time.time())
         with self._lock:
-            if self._db is None:
+            if not self._durable:
                 self._memory[answer_id] = (created, payload)
                 while len(self._memory) > self.max_memory:
                     self._memory.popitem(last=False)
                 return
             try:
-                self._db.execute("INSERT OR REPLACE INTO answers VALUES (?, ?, ?)",
-                                 (answer_id, created, json.dumps(payload, ensure_ascii=False)))
-                self._db.commit()
+                with self._connect() as db:
+                    db.execute("INSERT OR REPLACE INTO answers VALUES (?, ?, ?)",
+                               (answer_id, created, json.dumps(payload, ensure_ascii=False)))
+                    db.commit()
             except sqlite3.Error:
                 log.exception("could not store answer %s", answer_id)
                 return
@@ -76,12 +87,14 @@ class AnswerStore:
 
     def get(self, answer_id: str) -> dict | None:
         with self._lock:
-            if self._db is None:
+            if not self._durable:
                 entry = self._memory.get(answer_id)
             else:
                 try:
-                    row = self._db.execute("SELECT created, payload FROM answers WHERE id = ?",
-                                           (answer_id,)).fetchone()
+                    with self._connect() as db:
+                        row = db.execute(
+                            "SELECT created, payload FROM answers WHERE id = ?", (answer_id,)
+                        ).fetchone()
                 except sqlite3.Error:
                     log.exception("could not read answer %s", answer_id)
                     return None
@@ -96,27 +109,28 @@ class AnswerStore:
             return 0
         cutoff = time.time() - self.max_age_s
         with self._lock:
-            if self._db is None:
+            if not self._durable:
                 old = [k for k, (ts, _) in self._memory.items() if ts < cutoff]
                 for k in old:
                     del self._memory[k]
                 return len(old)
             try:
-                n = self._db.execute("DELETE FROM answers WHERE created < ?", (cutoff,)).rowcount
-                self._db.commit()
+                with self._connect() as db:
+                    n = db.execute("DELETE FROM answers WHERE created < ?", (cutoff,)).rowcount
+                    db.commit()
                 return n
             except sqlite3.Error:
                 log.exception("could not purge old answers")
                 return 0
 
     def close(self) -> None:
-        with self._lock:
-            if self._db is not None:
-                self._db.close()
-                self._db = None
+        # Connections are scoped to individual operations, so there is no
+        # persistent handle to close. Keep this method for lifecycle callers.
+        return
 
     def __len__(self) -> int:
         with self._lock:
-            if self._db is None:
+            if not self._durable:
                 return len(self._memory)
-            return self._db.execute("SELECT COUNT(*) FROM answers").fetchone()[0]
+            with self._connect() as db:
+                return db.execute("SELECT COUNT(*) FROM answers").fetchone()[0]
