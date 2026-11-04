@@ -5,6 +5,14 @@ open is in [IMPROVEMENTS.md](IMPROVEMENTS.md).
 
 ## Unreleased
 
+### Faster local answers
+- Ollama requests disable hidden reasoning by default (`RAG_OLLAMA_THINK=false`) and
+  use a 512-token output budget.
+- Obvious unsupported drafts become deterministic `NOT_FOUND` refusals instead of
+  triggering a corrective generation.
+- The local launcher disables model-generated general guidance by default, avoiding
+  a second full local inference call for questions outside the indexed corpus.
+
 ### Windows lifecycle and portability
 - SQLite answer stores now open short-lived connections per operation, preventing
   Windows file-lock leaks when services and test clients are recreated.

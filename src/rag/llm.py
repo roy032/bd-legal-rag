@@ -24,7 +24,10 @@ StreamLLM = Callable[[str, str], "Iterator[str]"]  # (system, user_prompt) -> te
 
 DEFAULT_TIMEOUT_S = float(os.environ.get("RAG_LLM_TIMEOUT") or "120")
 DEFAULT_RETRIES = int(os.environ.get("RAG_LLM_RETRIES") or "2")
-DEFAULT_MAX_TOKENS = int(os.environ.get("RAG_MAX_TOKENS") or "1024")
+DEFAULT_MAX_TOKENS = int(os.environ.get("RAG_MAX_TOKENS") or "512")
+OLLAMA_THINK = (os.environ.get("RAG_OLLAMA_THINK") or "false").strip().lower() in {
+    "1", "true", "yes", "on"
+}
 # Ollama's default context window is small (2-4k tokens). Five Bangla excerpts
 # plus the instructions are well past that, and Ollama truncates the *start* of
 # the prompt silently — the model then answers without the rules or the first
@@ -128,6 +131,7 @@ def ollama_llm(model: str | None = None, host: str | None = None,
         r = requests.post(f"{host}/api/generate", timeout=timeout_s, json={
             "model": model, "system": system, "prompt": prompt, "stream": False,
             "keep_alive": OLLAMA_KEEP_ALIVE,
+            "think": OLLAMA_THINK,
             "options": {"temperature": 0, "num_predict": DEFAULT_MAX_TOKENS,
                         "num_ctx": OLLAMA_NUM_CTX}})
         if r.status_code >= 400:          # Ollama explains itself in the body ("model not found")
@@ -340,7 +344,8 @@ def ollama_stream(model: str | None = None, host: str | None = None,
             # that stalls mid-answer fails instead of holding the connection forever.
             with requests.post(f"{host}/api/generate", stream=True, timeout=(10, timeout_s),
                                json={"model": model, "system": system, "prompt": prompt,
-                                     "stream": True, "keep_alive": OLLAMA_KEEP_ALIVE,
+                                     "stream": True, "think": OLLAMA_THINK,
+                                     "keep_alive": OLLAMA_KEEP_ALIVE,
                                      "options": {"temperature": 0, "num_predict": DEFAULT_MAX_TOKENS,
                                                  "num_ctx": OLLAMA_NUM_CTX}}) as r:
                 if r.status_code >= 400:

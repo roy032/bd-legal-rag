@@ -47,6 +47,16 @@ def private_env(env: Mapping[str, str], model: str, offline: bool) -> dict[str, 
     out = {k: v for k, v in env.items() if k not in OUTSIDE_SETTINGS}
     out.update({"RAG_LLM": "ollama", "RAG_MODEL": model, "OLLAMA_HOST": LOCAL_OLLAMA,
                 "PYTHONUTF8": "1"})
+    # A second local generation for optional general guidance makes an
+    # unsupported question as slow as a grounded answer. The deterministic
+    # NOT_FOUND response is faster and safer; deployments can opt back in.
+    out.setdefault("BDRAG_GENERAL_FALLBACK", "false")
+    # Keep CPU prompt evaluation bounded for the desktop launcher. Full
+    # deployments can raise these values when recall is more important than
+    # latency.
+    out.setdefault("BDRAG_K", "3")
+    out.setdefault("RAG_EXCERPT_CHARS", "800")
+    out.setdefault("OLLAMA_NUM_CTX", "4096")
     out.setdefault("OLLAMA_KEEP_ALIVE", "30m")      # keep the model loaded between questions
     if offline:
         out.update({"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"})

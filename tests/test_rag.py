@@ -195,6 +195,19 @@ class TestEndToEnd(unittest.TestCase):
         self.assertTrue(ans.refused)
         self.assertEqual(ans.sources, [])
 
+    def test_uncited_unsupported_draft_does_not_trigger_a_second_call(self):
+        calls = []
+
+        def fake_llm(system, prompt):
+            calls.append(prompt)
+            return "The excerpts do not mention any provisions related to theft."
+
+        ans = answer_question("What is the punishment for theft?", self.r, fake_llm, k=3)
+        self.assertTrue(ans.refused)
+        self.assertFalse(ans.repaired)
+        self.assertEqual(ans.llm_calls, 1)
+        self.assertEqual(len(calls), 1)
+
     def test_citation_numbers_match_answer_hits(self):
         """A [n] in the answer must point at Answer.hits[n-1] even after reordering."""
         captured = {}

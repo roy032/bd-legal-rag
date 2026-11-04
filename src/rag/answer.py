@@ -42,6 +42,14 @@ PLAIN_SYSTEM_ID = ACTIVE_PLAIN_SYSTEM.id
 
 REFUSAL_MARK = "NOT_FOUND"
 CITE_RE = re.compile(r"\[(\d{1,2})\]")
+UNSUPPORTED_DRAFT_RE = re.compile(
+    r"(?:excerpts?|passages?|provided (?:text|context)|retrieved (?:text|context))"
+    r".{0,80}(?:do not|don't|does not|doesn't|cannot|can't|contain|mention|answer|"
+    r"address|provide|include|say)|"
+    r"(?:no relevant|not enough|insufficient).{0,50}(?:information|evidence|"
+    r"provision|context|excerpt|passage)",
+    re.IGNORECASE | re.DOTALL,
+)
 # What models actually write: "[১]" in a Bangla answer, "[1, 3]", "[1–2]", "[১,২]".
 _LOOSE_CITE = re.compile(r"\[\s*([0-9০-৯]{1,2}(?:\s*(?:,|،|;|and|ও|-|–)\s*[0-9০-৯]{1,2})*)\s*\]")
 _REFUSAL_HEAD = re.compile(r"^[\s*_#>`\-]*(?i:answer\s*:\s*)?NOT[_ ]FOUND\b[\s*_`]*:?[\s*_`]*")
@@ -78,6 +86,12 @@ def normalize_answer(text: str) -> str:
 
 def is_refusal(text: str) -> bool:
     return normalize_answer(text).startswith(REFUSAL_MARK)
+
+
+def is_unsupported_draft(text: str) -> bool:
+    """Recognize a model's uncited refusal before invoking an expensive repair."""
+    normalized = normalize_answer(text)
+    return not CITE_RE.search(normalized) and bool(UNSUPPORTED_DRAFT_RE.search(normalized))
 
 
 @dataclass
@@ -319,7 +333,12 @@ def answer_question_stream(question: str, retriever, stream_llm, k: int = 5,
         raise LLMError("the answering model returned an empty response")
 
     refused = text.startswith(REFUSAL_MARK)
-    checks = {} if refused else run_checks(question, text, ordered, guard)
+    if not refused and is_unsupported_draft(text):
+        text = f"{REFUSAL_MARK}: The retrieved excerpts do not answer this question."
+        refused = True
+        checks = {}
+    else:
+        checks = {} if refused else run_checks(question, text, ordered, guard)
     repaired = False
     if not refused and checks["failures"] and guard.repair and repair_llm:
         yield {"type": "status", "stage": "repairing", "failures": checks["failures"]}
